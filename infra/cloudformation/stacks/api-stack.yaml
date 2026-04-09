@@ -10,6 +10,20 @@ Parameters:
   LambdaCodeKey:
     Type: String
     Description: S3 key of the Lambda deployment ZIP.
+  ApiCustomDomainName:
+    Type: String
+    Default: ''
+    Description: Optional custom domain for HTTP API (e.g. api-dev.fincora.io).
+  ApiCustomDomainCertificateArn:
+    Type: String
+    Default: ''
+    Description: Optional ACM certificate ARN in same region as API.
+
+Conditions:
+  HasApiCustomDomainName: !Not [!Equals [!Ref ApiCustomDomainName, '']]
+  HasApiCustomDomainCertificateArn: !Not [!Equals [!Ref ApiCustomDomainCertificateArn, '']]
+  HasApiCustomDomain:
+    !And [!Condition HasApiCustomDomainName, !Condition HasApiCustomDomainCertificateArn]
 
 Resources:
   ApipApiFunction:
@@ -98,6 +112,24 @@ Resources:
       StageName: $default
       AutoDeploy: true
 
+  ApipCustomDomain:
+    Type: AWS::ApiGatewayV2::DomainName
+    Condition: HasApiCustomDomain
+    Properties:
+      DomainName: !Ref ApiCustomDomainName
+      DomainNameConfigurations:
+        - CertificateArn: !Ref ApiCustomDomainCertificateArn
+          EndpointType: REGIONAL
+          SecurityPolicy: TLS_1_2
+
+  ApipCustomDomainMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Condition: HasApiCustomDomain
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      DomainName: !Ref ApipCustomDomain
+      Stage: !Ref ApipStage
+
   ApipPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -117,3 +149,11 @@ Outputs:
     Value: !GetAtt ApipApiFunction.Arn
     Export:
       Name: apip-api-function-arn
+  ApiCustomDomainRegionalName:
+    Condition: HasApiCustomDomain
+    Description: Regional domain target to create CNAME in external DNS.
+    Value: !GetAtt ApipCustomDomain.RegionalDomainName
+  ApiCustomDomainHostedZoneId:
+    Condition: HasApiCustomDomain
+    Description: Hosted zone id for alias records (Route53 only).
+    Value: !GetAtt ApipCustomDomain.RegionalHostedZoneId

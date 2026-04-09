@@ -211,12 +211,17 @@ jobs:
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
       - name: Deploy api-stack
         run: |
+          EXTRA_PARAMS=""
+          if [[ -n "${{ vars.API_CUSTOM_DOMAIN_NAME }}" && -n "${{ vars.API_CUSTOM_DOMAIN_CERT_ARN }}" ]]; then
+            EXTRA_PARAMS="ApiCustomDomainName=${{ vars.API_CUSTOM_DOMAIN_NAME }} ApiCustomDomainCertificateArn=${{ vars.API_CUSTOM_DOMAIN_CERT_ARN }}"
+          fi
           aws cloudformation deploy \
             --stack-name apip-api \
             --template-file infra/cloudformation/stacks/api-stack.yaml \
             --parameter-overrides \
               LambdaCodeBucket=${{ needs.build-lambda.outputs.lambda_code_bucket }} \
               LambdaCodeKey=${{ needs.build-lambda.outputs.lambda_code_key }} \
+              ${EXTRA_PARAMS} \
             --capabilities CAPABILITY_NAMED_IAM \
             --role-arn arn:aws:iam::${{ needs.resolve-target.outputs.aws_account_id }}:role/AWSAPIPCloudFormationExecutionRole \
             --no-fail-on-empty-changeset
