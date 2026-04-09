@@ -17,9 +17,30 @@ permissions:
   contents: read
 
 jobs:
+  qa-build:
+    name: QA build (lint, typecheck, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm run test
+      - name: Build
+        run: npm run build
+
   resolve-target:
     name: Resolve target account/env
     runs-on: ubuntu-latest
+    needs: [qa-build]
     outputs:
       env_short: ${{ steps.target.outputs.env_short }}
       aws_account_id: ${{ steps.target.outputs.aws_account_id }}
@@ -148,10 +169,15 @@ jobs:
         with:
           node-version: '20'
           cache: npm
-      - name: Install, compile, zip (handler at zip root)
+      - name: Install and compile
+        run: |
+          npm ci
+          npm run build
+      - name: Prepare production package
         run: |
           npm ci --omit=dev
-          npm run build
+      - name: Zip lambda artifact (handler at zip root)
+        run: |
           cd dist
           cp -r ../node_modules .
           zip -qr ../apip-api.zip .
