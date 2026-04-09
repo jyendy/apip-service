@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  APIP HTTP API, Lambda, JWT (Cognito), execution role. ImportValue from data,
+  messaging, cognito-stack (pool + app client).
+
+Parameters:
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket containing the Lambda deployment ZIP.
+  LambdaCodeKey:
+    Type: String
+    Description: S3 key of the Lambda deployment ZIP.
+
+Resources:
+  ApipApiFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: apip-api
+      Runtime: nodejs20.x
+      Handler: lambda.handler
+      # Rol estándar definido en apip-policies (en vez de un rol inline específico aquí).
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/AWSAPIPLambdaExecutionRole'
+      Timeout: 29
+      MemorySize: 512
+      Environment:
+        Variables:
+          APIP_TABLE_NAME:
+            Fn::ImportValue: apip-core-table-name
+          APIP_AUDIT_TABLE_NAME:
+            Fn::ImportValue: apip-audit-table-name
+          EVENT_BUS_NAME:
+            Fn::ImportValue: apip-event-bus-name
+          ALLOW_DEV_TENANT_HEADER: 'false'
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref LambdaCodeKey
+
+  ApipHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: apip-http
+      ProtocolType: HTTP
+
+  ApipJwtAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      Name: apip-cognito-jwt
+      AuthorizerType: JWT
+      IdentitySource:
+        - $request.header.Authorization
+      JwtConfiguration:
+        Audience:
+          - Fn::ImportValue: apip-cognito-app-client-id
+        Issuer: !Sub
+          - 'https://cognito-idp.${AWS::Region}.amazonaws.com/${PoolId}'
+          - PoolId: !ImportValue apip-cognito-user-pool-id
+
+  ApipLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt ApipApiFunction.Arn
+      PayloadFormatVersion: '2.0'
+      IntegrationMethod: POST
+
+  # Sin JWT: comprobaciones de salud y preflight CORS (Bearer no enviado en OPTIONS).
+  ApipHealthRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /health
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+
+  ApipOptionsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: OPTIONS /{proxy+}
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+
+  ApipDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: 'ANY /{proxy+}'
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+
+  ApipStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      StageName: $default
+      AutoDeploy: true
+
+  ApipPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApipApiFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApipHttpApi}/*/*/*'
+
+Outputs:
+  HttpApiUrl:
+    Description: HTTP API base URL
+    Value: !GetAtt ApipHttpApi.ApiEndpoint
+    Export:
+      Name: apip-http-api-url
+  ApiFunctionArn:
+    Description: API Lambda function ARN
+    Value: !GetAtt ApipApiFunction.Arn
+    Export:
+      Name: apip-api-function-arn

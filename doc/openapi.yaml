@@ -1,0 +1,93 @@
+openapi: 3.0.3
+info:
+  title: APIP API
+  version: 0.1.0
+  description: Asset Performance Intelligence Platform — backend MVP (ver prompt-backend-consolidado en apip-front).
+servers:
+  - url: https://{apiId}.execute-api.{region}.amazonaws.com
+    variables:
+      apiId:
+        default: api-id
+      region:
+        default: us-east-1
+paths:
+  /health:
+    get:
+      summary: Health check (sin auth en gateway si se configura ruta pública)
+      responses:
+        '200':
+          description: OK
+  /v1/assets:
+    get:
+      summary: Listar activos
+      parameters:
+        - name: projectId
+          in: query
+          schema:
+            type: string
+        - name: portfolioId
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+    post:
+      summary: Crear activo
+  /v1/assets/{assetId}:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Obtener activo
+    patch:
+      summary: Actualizar activo
+    delete:
+      summary: Eliminar activo
+  /v1/assets/{assetId}/metrics:
+    get:
+      summary: Métricas financieras calculadas
+  /v1/assets/{assetId}/cashflow:
+    get:
+      summary: Serie de cash flow
+  /v1/assets/{assetId}/structure:
+    get:
+      summary: Estructura financiera estandarizada
+  /v1/portfolios:
+    get: {}
+    post: {}
+  /v1/portfolios/{id}/metrics:
+    get: {}
+  /v1/portfolios/{id}/cashflow:
+    get: {}
+  /v1/portfolios/{id}/performance:
+    get: {}
+  /v1/projects:
+    get: {}
+    post: {}
+  /v1/projects/{id}/metrics:
+    get: {}
+  /v1/projects/{id}/cashflow:
+    get: {}
+  /v1/dashboard/executive:
+    get:
+      summary: KPIs ejecutivos agregados
+  /v1/insights:
+    get:
+      summary: Insights determinísticos
+  /v1/imports/assets:
+    post:
+      summary: Iniciar import (job asíncrono en evolución)
+  /v1/imports/assets/{jobId}:
+    get:
+      summary: Estado del job de import
+  /v1/simulations:
+    post:
+      summary: Simulación de escenario
+  /v1/alerts:
+    get:
+      summary: Alertas (MVP vacío o reglas básicas)
