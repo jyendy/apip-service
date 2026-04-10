@@ -39,6 +39,15 @@ export type AssetType = 'transport' | 'real_estate' | 'machinery' | 'energy' | '
 
 export type AssetStatus = 'active' | 'inactive' | 'maintenance' | 'sold'
 
+/** Modelo financiero estimado (simulación); los hechos operativos van en RevenueFact/CostFact. */
+export type AssetFinancialModel = {
+  estimatedMonthlyRevenue: number
+  estimatedMonthlyCost: number
+  durationMonths: number
+  revenueGrowthRate?: number
+  costGrowthRate?: number
+}
+
 export type Asset = {
   id: string
   tenantId: string
@@ -51,6 +60,8 @@ export type Asset = {
   currency: string
   status: AssetStatus
   metadata?: Record<string, unknown>
+  /** Supuestos de simulación cuando aún no hay o hay pocos hechos reales. */
+  financialModel?: AssetFinancialModel
   createdAt: string
   updatedAt: string
 }
@@ -125,18 +136,33 @@ export type Insight = {
   generatedAt: string
 }
 
+export type CashFlowPeriodMode = 'ACTUAL' | 'PROJECTED'
+
 export type CashFlowPoint = {
   date: string
   revenue: number
   costs: number
   netCashFlow: number
   cumulativeCashFlow: number
+  /** Origen del mes respecto al motor híbrido. */
+  mode: CashFlowPeriodMode
+}
+
+export type MetricsDataMode = 'SIMULATION' | 'ACTUAL' | 'HYBRID'
+
+export type MetricsCoverage = {
+  actualMonths: number
+  projectedMonths: number
+  totalMonths: number
 }
 
 export type AssetMetricsComputed = {
   assetId: string
   initialInvestment: number
   accumulatedRevenue: number
+  /** Suma de costos mensuales de la serie (actual + proyectado). */
+  totalCosts: number
+  /** Costes operativos + mantenimiento + depreciación (agregado; compatible con vistas previas). */
   operatingCosts: number
   ebitda: number
   netProfit: number
@@ -145,5 +171,7 @@ export type AssetMetricsComputed = {
   paybackPeriodMonths: number
   npv: number
   cashFlow: CashFlowPoint[]
+  dataMode: MetricsDataMode
+  coverage: MetricsCoverage
   calculationVersion: string
 }

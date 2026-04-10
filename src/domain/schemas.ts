@@ -1,5 +1,16 @@
 import { z } from 'zod'
 
+export const createTenantBody = z.object({
+  name: z.string().min(1),
+  type: z.enum(['fund', 'company', 'family_office', 'other']),
+  id: z.string().min(1).optional(),
+})
+
+export const patchTenantBody = z.object({
+  name: z.string().min(1).optional(),
+  type: z.enum(['fund', 'company', 'family_office', 'other']).optional(),
+})
+
 export const createPortfolioBody = z.object({
   name: z.string().min(1),
   strategy: z.string().optional(),
@@ -20,6 +31,16 @@ export const createProjectBody = z.object({
 
 export const patchProjectBody = createProjectBody.partial().omit({ portfolioId: true })
 
+const financialModelSchema = z
+  .object({
+    estimatedMonthlyRevenue: z.number().nonnegative(),
+    estimatedMonthlyCost: z.number().nonnegative(),
+    durationMonths: z.number().int().positive().max(600),
+    revenueGrowthRate: z.number().optional(),
+    costGrowthRate: z.number().optional(),
+  })
+  .optional()
+
 export const createAssetBody = z.object({
   portfolioId: z.string().min(1),
   projectId: z.string().min(1),
@@ -30,6 +51,7 @@ export const createAssetBody = z.object({
   currency: z.string().length(3).default('USD'),
   status: z.enum(['active', 'inactive', 'maintenance', 'sold']).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  financialModel: financialModelSchema,
 })
 
 export const patchAssetBody = createAssetBody.partial().omit({ portfolioId: true, projectId: true })
@@ -55,4 +77,17 @@ export const simulationBody = z.object({
 export const importAssetsBody = z.object({
   fileName: z.string().min(1),
   templateVersion: z.string().optional(),
+})
+
+export const putAssetCashFlowsBody = z.object({
+  periods: z
+    .array(
+      z.object({
+        period: z.string().regex(/^\d{4}-\d{2}$/),
+        revenue: z.number().nonnegative(),
+        cost: z.number().nonnegative(),
+        source: z.enum(['manual', 'tms', 'erp', 'import', 'api']).optional(),
+      }),
+    )
+    .min(1),
 })

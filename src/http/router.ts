@@ -1,30 +1,34 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda'
-import { resolveRequestContext } from '../auth/context'
+import { resolvePlatformAdmin, resolveRequestContext } from '../auth/context'
 import * as repo from '../repositories/core-repository'
 import {
   createAssetBody,
   createPortfolioBody,
   createProjectBody,
+  createTenantBody,
   importAssetsBody,
   listQuery,
   patchAssetBody,
   patchPortfolioBody,
   patchProjectBody,
+  patchTenantBody,
+  putAssetCashFlowsBody,
   simulationBody,
 } from '../domain/schemas'
 import { json, jsonError, noContent } from '../lib/http'
 import { newId } from '../lib/ids'
 import { publishDomainEvent } from '../lib/events'
-import { computeAssetMetrics } from '../services/metrics'
-import { buildStandardizedStructure } from '../services/structure'
-import { buildInsights } from '../services/insights'
 import {
   buildMonthlyCashFlowSeries,
+  CALCULATION_VERSION,
   irrMonthlyPercent,
   npvFromMonthlyFlows,
   simpleRoiPercent,
 } from '../financial/engine'
-import type { Asset, ImportJob, Portfolio, Project } from '../domain/types'
+import { computeAssetMetrics } from '../services/metrics'
+import { buildStandardizedStructure } from '../services/structure'
+import { buildInsights } from '../services/insights'
+import type { Asset, CostFact, ImportJob, Portfolio, Project, RevenueFact, Tenant } from '../domain/types'
 
 const BUS = process.env.EVENT_BUS_NAME
 
@@ -43,6 +47,54 @@ async function ensureTenant(tenantId: string): Promise<APIGatewayProxyResultV2 |
   return null
 }
 
+async function routeAdmin(
+  event: APIGatewayProxyEventV2,
+  method: string,
+  seg: string[],
+): Promise<APIGatewayProxyResultV2> {
+  if (seg[2] === 'tenants' && seg.length === 3) {
+    if (method === 'GET') {
+      const items = await repo.listTenants()
+      return json(200, { items })
+    }
+    if (method === 'POST') {
+      const body = createTenantBody.safeParse(parseBody(event.body))
+      if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+      const now = new Date().toISOString()
+      const id = body.data.id ?? newId.tenant()
+      const t: Tenant = {
+        id,
+        name: body.data.name,
+        type: body.data.type,
+        createdAt: now,
+      }
+      await repo.putTenant(t)
+      return json(201, t)
+    }
+  }
+  if (seg[2] === 'tenants' && seg[3] && seg.length === 4) {
+    const tenantId = seg[3]
+    if (method === 'GET') {
+      const t = await repo.getTenant(tenantId)
+      if (!t) return jsonError(404, 'NOT_FOUND', 'Tenant no encontrado')
+      return json(200, t)
+    }
+    if (method === 'PATCH') {
+      const existing = await repo.getTenant(tenantId)
+      if (!existing) return jsonError(404, 'NOT_FOUND', 'Tenant no encontrado')
+      const body = patchTenantBody.safeParse(parseBody(event.body))
+      if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+      const t: Tenant = {
+        ...existing,
+        ...body.data,
+      }
+      await repo.putTenant(t)
+      return json(200, t)
+    }
+  }
+  return jsonError(404, 'NOT_FOUND', `Ruta admin no implementada: ${method}`)
+}
+
 export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const method = event.requestContext.http.method
   if (method === 'OPTIONS') {
@@ -54,6 +106,22 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     return json(200, { status: 'ok', service: 'apip-service' })
   }
 
+  const seg = segments(path)
+
+  if (seg[0] === 'v1' && seg[1] === 'admin') {
+    const admin = resolvePlatformAdmin(event)
+    if (!admin) {
+      return jsonError(403, 'FORBIDDEN', 'Se requiere rol de administrador de plataforma (grupo Cognito o custom:platformAdmin)')
+    }
+    try {
+      return await routeAdmin(event, method, seg)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.error(e)
+      return jsonError(500, 'INTERNAL', msg)
+    }
+  }
+
   let ctx: ReturnType<typeof resolveRequestContext>
   try {
     ctx = resolveRequestContext(event)
@@ -63,8 +131,6 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
 
   const err = await ensureTenant(ctx.tenantId)
   if (err) return err
-
-  const seg = segments(path)
 
   try {
     // --- /v1/assets ---
@@ -102,6 +168,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           currency: b.currency ?? 'USD',
           status: b.status ?? 'active',
           metadata: b.metadata,
+          financialModel: b.financialModel,
           createdAt: now,
           updatedAt: now,
         }
@@ -174,6 +241,53 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       }
     }
 
+    if (seg[0] === 'v1' && seg[1] === 'assets' && seg[3] === 'cash-flows' && seg.length === 4) {
+      const assetId = seg[2]
+      if (method === 'PUT') {
+        const a = await repo.getAsset(ctx.tenantId, assetId)
+        if (!a) return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
+        const body = putAssetCashFlowsBody.safeParse(parseBody(event.body))
+        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const src = (s: string | undefined): RevenueFact['source'] => {
+          if (s === 'import' || s === 'api') return s
+          if (s === 'tms' || s === 'erp') return 'api'
+          return 'manual'
+        }
+        for (const p of body.data.periods) {
+          const iso = `${p.period}-01T00:00:00.000Z`
+          const rid = `m-${p.period}-rev`
+          const cid = `m-${p.period}-cost`
+          const rf: RevenueFact = {
+            id: rid,
+            tenantId: ctx.tenantId,
+            assetId,
+            date: iso,
+            amount: p.revenue,
+            category: 'monthly',
+            source: src(p.source),
+            createdAt: now,
+          }
+          const cf: CostFact = {
+            id: cid,
+            tenantId: ctx.tenantId,
+            assetId,
+            date: iso,
+            amount: p.cost,
+            category: 'operational',
+            source: src(p.source),
+            createdAt: now,
+          }
+          await repo.putRevenueFact(rf)
+          await repo.putCostFact(cf)
+        }
+        const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
+        const cost = await repo.listCostFacts(ctx.tenantId, assetId)
+        const metrics = computeAssetMetrics(a, rev, cost)
+        return json(200, { assetId, updatedPeriods: body.data.periods.length, metrics })
+      }
+    }
+
     if (seg[0] === 'v1' && seg[1] === 'assets' && seg[3] === 'structure' && seg.length === 4) {
       const assetId = seg[2]
       if (method === 'GET') {
@@ -182,7 +296,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
         const cost = await repo.listCostFacts(ctx.tenantId, assetId)
         const metrics = computeAssetMetrics(a, rev, cost)
-        const { lines, operatingIncome } = buildStandardizedStructure(metrics, cost)
+        const { lines, operatingIncome } = buildStandardizedStructure(metrics, rev, cost)
         return json(200, { assetId, lines, operatingIncome, ebitda: metrics.ebitda, netProfit: metrics.netProfit })
       }
     }
@@ -494,7 +608,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
             const cum = series.slice(0, i + 1).reduce((x, y) => x + y.net, 0)
             return cum >= b.initialCapital
           }),
-          calculationVersion: '2025.04.0',
+          calculationVersion: CALCULATION_VERSION,
         })
       }
     }

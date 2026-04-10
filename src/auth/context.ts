@@ -10,9 +10,31 @@ export type RequestContext = {
   subject?: string
 }
 
-export function resolveRequestContext(event: APIGatewayProxyEventV2): RequestContext {
+/** Claims JWT sin validar tenant (p. ej. admin de plataforma). */
+export function getJwtClaims(event: APIGatewayProxyEventV2): Record<string, string> | undefined {
   const jwt = (event.requestContext as RequestContextWithJwt).authorizer?.jwt
-  const claims = jwt?.claims as Record<string, string> | undefined
+  return jwt?.claims as Record<string, string> | undefined
+}
+
+/**
+ * Usuario con permiso para /v1/admin/* (grupo Cognito o claim).
+ * Configurar grupo en Cognito y `PLATFORM_ADMIN_GROUP` en Lambda (default: apip-platform-admin).
+ */
+export function resolvePlatformAdmin(event: APIGatewayProxyEventV2): { subject: string } | null {
+  const claims = getJwtClaims(event)
+  if (!claims?.sub) return null
+  const groupName = process.env.PLATFORM_ADMIN_GROUP ?? 'apip-platform-admin'
+  const raw = claims['cognito:groups']
+  const groups = raw
+    ? raw.split(',').map(s => s.trim()).filter(Boolean)
+    : []
+  if (groups.includes(groupName)) return { subject: claims.sub }
+  if (claims['custom:platformAdmin'] === 'true') return { subject: claims.sub }
+  return null
+}
+
+export function resolveRequestContext(event: APIGatewayProxyEventV2): RequestContext {
+  const claims = getJwtClaims(event)
 
   const fromClaims =
     claims?.['custom:tenantId'] ?? claims?.tenantId ?? claims?.['custom:tenant_id']

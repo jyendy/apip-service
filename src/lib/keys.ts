@@ -1,5 +1,10 @@
 /** Single-table: PK = TENANT#{tenantId}, SK según entidad. */
 
+/** Registro global para listar tenants (admin plataforma). */
+export const pkPlatformRegistry = () => 'PLATFORM#REGISTRY'
+
+export const skTenantRegistryEntry = (tenantId: string) => `TENANT#${tenantId}`
+
 export const pkTenant = (tenantId: string) => `TENANT#${tenantId}`
 
 export const skTenantMeta = () => 'META#TENANT'

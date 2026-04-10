@@ -52,6 +52,13 @@ Resources:
         IdToken: minutes
         RefreshToken: days
 
+  ApipPlatformAdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: apip-platform-admin
+      Description: Plataforma root admin para rutas /v1/admin/*
+      UserPoolId: !Ref ApipUserPool
+
 Outputs:
   UserPoolId:
     Description: User Pool ID (JWT issuer)
@@ -63,3 +70,6 @@ Outputs:
     Value: !Ref ApipUserPoolClient
     Export:
       Name: apip-cognito-app-client-id
+  PlatformAdminGroupName:
+    Description: Grupo de admin de plataforma para apip-service
+    Value: !Ref ApipPlatformAdminGroup

@@ -19,6 +19,7 @@ import { getDocumentClient, tableName } from './dynamo-client'
 
 const ENTITY = {
   TENANT: 'TENANT',
+  TENANT_REGISTRY: 'TENANT_REGISTRY',
   PORTFOLIO: 'PORTFOLIO',
   PROJECT: 'PROJECT',
   ASSET: 'ASSET',
@@ -40,6 +41,47 @@ export async function putTenant(t: Tenant): Promise<void> {
     ...t,
   })
   await ddb.send(new PutCommand({ TableName: tableName(), Item: item }))
+  await putTenantRegistryEntry(t)
+}
+
+/** Índice de listado para admin (PK fija PLATFORM#REGISTRY). */
+async function putTenantRegistryEntry(t: Tenant): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: {
+        PK: keys.pkPlatformRegistry(),
+        SK: keys.skTenantRegistryEntry(t.id),
+        entityType: ENTITY.TENANT_REGISTRY,
+        tenantId: t.id,
+        name: t.name,
+        type: t.type,
+        createdAt: t.createdAt,
+      },
+    }),
+  )
+}
+
+export async function listTenants(): Promise<Tenant[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkPlatformRegistry(),
+        ':pfx': 'TENANT#',
+      },
+    }),
+  )
+  const rows = (r.Items ?? []) as CoreItem[]
+  return rows.map(row => ({
+    id: String(row.tenantId),
+    name: String(row.name),
+    type: row.type as Tenant['type'],
+    createdAt: String(row.createdAt),
+  }))
 }
 
 export async function getTenant(tenantId: string): Promise<Tenant | null> {

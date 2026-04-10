@@ -2,7 +2,7 @@
  * Motor financiero (MVP). Las fórmulas son versionables; ajustar según definición contable del producto.
  * calculationVersion: bump cuando cambien reglas.
  */
-export const CALCULATION_VERSION = '2025.04.0'
+export const CALCULATION_VERSION = '2026.04.0'
 
 export type MonthlySeriesInput = {
   months: number

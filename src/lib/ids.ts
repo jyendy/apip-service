@@ -6,6 +6,7 @@ function shortId(prefix: string): string {
 }
 
 export const newId = {
+  tenant: () => shortId('ten'),
   portfolio: () => shortId('prt'),
   project: () => shortId('prj'),
   asset: () => shortId('ast'),

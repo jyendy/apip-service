@@ -66,7 +66,7 @@ aws cloudformation deploy --stack-name apip-api --template-file stacks/api-stack
 `cognito-stack` crea el **User Pool** (`apip-users`), un **app client** y exporta IDs. El `api-stack` enlaza el authorizer JWT vía **`Fn::ImportValue`** (sin parámetros manuales de Cognito).
 
 - El cliente envía `Authorization: Bearer <token>`. Suele usarse el **ID token** (`aud` = app client).
-- Rutas **sin** JWT: `GET /health` y `OPTIONS /{proxy+}`.
+- Rutas **sin** JWT: `GET /health` y **`OPTIONS /v1/{proxy+}`** (preflight CORS). El resto de operaciones van en rutas **explícitas** con JWT (no `ANY /{proxy+}`). CORS lo gestiona `CorsConfiguration` en la HTTP API.
 - El pool define el atributo personalizado **`custom:tenantId`** (mutable) para alinearlo con `src/auth/context.ts`.
 
 ## Stacks futuros (no incluidos aún)

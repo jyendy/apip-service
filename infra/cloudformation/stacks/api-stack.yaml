@@ -45,6 +45,7 @@ Resources:
           EVENT_BUS_NAME:
             Fn::ImportValue: apip-event-bus-name
           ALLOW_DEV_TENANT_HEADER: 'false'
+          PLATFORM_ADMIN_GROUP: apip-platform-admin
       Code:
         S3Bucket: !Ref LambdaCodeBucket
         S3Key: !Ref LambdaCodeKey
@@ -54,6 +55,19 @@ Resources:
     Properties:
       Name: apip-http
       ProtocolType: HTTP
+      CorsConfiguration:
+        AllowHeaders:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - PATCH
+          - DELETE
+          - PUT
+          - OPTIONS
+        AllowOrigins:
+          - '*'
+        MaxAge: 86400
 
   ApipJwtAuthorizer:
     Type: AWS::ApiGatewayV2::Authorizer
@@ -79,7 +93,7 @@ Resources:
       PayloadFormatVersion: '2.0'
       IntegrationMethod: POST
 
-  # Sin JWT: comprobaciones de salud y preflight CORS (Bearer no enviado en OPTIONS).
+  # Sin JWT: health. Preflight CORS lo responde API Gateway (CorsConfiguration).
   ApipHealthRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -88,19 +102,271 @@ Resources:
       AuthorizationType: NONE
       Target: !Sub 'integrations/${ApipLambdaIntegration}'
 
-  ApipOptionsRoute:
+  # Preflight explícito para clientes web / SPA bajo /v1 (navegadores; apps nativas suelen no usar CORS).
+  ApipOptionsV1ProxyRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref ApipHttpApi
-      RouteKey: OPTIONS /{proxy+}
+      RouteKey: OPTIONS /v1/{proxy+}
       AuthorizationType: NONE
       Target: !Sub 'integrations/${ApipLambdaIntegration}'
 
-  ApipDefaultRoute:
+  # Rutas explícitas (JWT) — sin ANY /{proxy+}. CORS vía CorsConfiguration en ApipHttpApi.
+  ApipJwtRouteGetV1Assets:
     Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref ApipHttpApi
-      RouteKey: 'ANY /{proxy+}'
+      RouteKey: GET /v1/assets
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePostV1Assets:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: POST /v1/assets
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1AssetsId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/assets/{assetId}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePatchV1AssetsId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: PATCH /v1/assets/{assetId}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteDeleteV1AssetsId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: DELETE /v1/assets/{assetId}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1AssetsMetrics:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/assets/{assetId}/metrics
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1AssetsCashflow:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/assets/{assetId}/cashflow
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePutV1AssetsCashFlows:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: PUT /v1/assets/{assetId}/cash-flows
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1AssetsStructure:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/assets/{assetId}/structure
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1Portfolios:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/portfolios
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePostV1Portfolios:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: POST /v1/portfolios
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1PortfoliosId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/portfolios/{portfolioId}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePatchV1PortfoliosId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: PATCH /v1/portfolios/{portfolioId}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1PortfoliosMetrics:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/portfolios/{portfolioId}/metrics
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1PortfoliosCashflow:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/portfolios/{portfolioId}/cashflow
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1PortfoliosPerformance:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/portfolios/{portfolioId}/performance
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1Projects:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/projects
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePostV1Projects:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: POST /v1/projects
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1ProjectsId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/projects/{projectId}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePatchV1ProjectsId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: PATCH /v1/projects/{projectId}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1ProjectsMetrics:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/projects/{projectId}/metrics
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1ProjectsCashflow:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/projects/{projectId}/cashflow
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1DashboardExecutive:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/dashboard/executive
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1Insights:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/insights
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePostV1ImportsAssets:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: POST /v1/imports/assets
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1ImportsAssetsJob:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/imports/assets/{jobId}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePostV1Simulations:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: POST /v1/simulations
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1Alerts:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/alerts
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+
+  # Admin plataforma (mismo JWT; Lambda valida grupo Cognito / claim — ver PLATFORM_ADMIN_GROUP).
+  ApipJwtRouteGetV1AdminTenants:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/admin/tenants
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePostV1AdminTenants:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: POST /v1/admin/tenants
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1AdminTenantsId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/admin/tenants/{tenantId}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePatchV1AdminTenantsId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: PATCH /v1/admin/tenants/{tenantId}
       AuthorizationType: JWT
       AuthorizerId: !Ref ApipJwtAuthorizer
       Target: !Sub 'integrations/${ApipLambdaIntegration}'
