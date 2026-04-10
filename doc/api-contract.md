@@ -68,6 +68,16 @@ Incluye al menos: `accumulatedRevenue`, `totalCosts`, `ebitda`, `netProfit`, `ro
 | GET    | `/v1/portfolios/{portfolioId}/cashflow` | Series por activo |
 | GET    | `/v1/portfolios/{portfolioId}/performance` | KPIs agregados |
 
+**POST `/v1/portfolios`** — cuerpo JSON (validación Zod `createPortfolioBody` en `src/domain/schemas.ts`):
+
+| Campo | Tipo | Obligatorio | Reglas |
+|-------|------|-------------|--------|
+| `name` | string | Sí | Mínimo 1 carácter. |
+| `strategy` | string | No | Texto libre (estrategia o descripción corta). |
+| `baseCurrency` | string | No | Si se envía, **exactamente 3 caracteres** (p. ej. código ISO 4217 `USD`, `EUR`). Omitir o no enviar el campo si no aplica. |
+
+Respuesta **201**: objeto `Portfolio` creado (`id` generado en servidor, `tenantId` del JWT, `createdAt` / `updatedAt` en ISO 8601).
+
 ### Projects
 
 | Método | Ruta | Descripción |
