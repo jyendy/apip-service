@@ -121,6 +121,26 @@ export type ImportJob = {
   updatedAt: string
 }
 
+export type Simulation = {
+  id: string
+  tenantId: string
+  name?: string
+  assetType: AssetType
+  initialCapital: number
+  expectedMonthlyRevenue: number
+  expectedOperatingCost: number
+  growthRatePercent?: number
+  durationMonths: number
+  discountRateAnnual?: number
+  projectedROI: number
+  projectedIRR: number
+  projectedNPV: number
+  breakEvenMonth: number
+  calculationVersion: string
+  createdAt: string
+  updatedAt: string
+}
+
 export type InsightSeverity = 'info' | 'warning' | 'critical'
 
 export type Insight = {

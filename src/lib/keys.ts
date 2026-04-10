@@ -21,6 +21,8 @@ export const skCostFact = (assetId: string, factId: string) => `ASSET#${assetId}
 
 export const skImportJob = (jobId: string) => `IMPORT#${jobId}`
 
+export const skSimulation = (simulationId: string) => `SIMULATION#${simulationId}`
+
 /** GSI1: listar activos por proyecto */
 export const gsi1pkProjectAssets = (tenantId: string, projectId: string) =>
   `TENANT#${tenantId}#PROJECT#${projectId}`

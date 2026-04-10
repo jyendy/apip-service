@@ -13,5 +13,6 @@ export const newId = {
   fact: () => shortId('fact'),
   capital: () => shortId('cap'),
   importJob: () => shortId('imp'),
+  simulation: () => shortId('sim'),
   insight: () => shortId('ins'),
 }

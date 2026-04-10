@@ -12,6 +12,7 @@ import type {
   Portfolio,
   Project,
   RevenueFact,
+  Simulation,
   Tenant,
 } from '../domain/types'
 import * as keys from '../lib/keys'
@@ -26,6 +27,7 @@ const ENTITY = {
   REV_FACT: 'REV_FACT',
   COST_FACT: 'COST_FACT',
   IMPORT: 'IMPORT',
+  SIMULATION: 'SIMULATION',
 } as const
 
 type CoreItem = Record<string, unknown> & { PK: string; SK: string }
@@ -364,4 +366,54 @@ export async function getImportJob(tenantId: string, jobId: string): Promise<Imp
   )
   if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.IMPORT) return null
   return r.Item as unknown as ImportJob
+}
+
+export async function putSimulation(sim: Simulation): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(sim.tenantId, keys.skSimulation(sim.id), {
+        entityType: ENTITY.SIMULATION,
+        ...sim,
+      }),
+    }),
+  )
+}
+
+export async function getSimulation(tenantId: string, simulationId: string): Promise<Simulation | null> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new GetCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skSimulation(simulationId) },
+    }),
+  )
+  if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.SIMULATION) return null
+  return r.Item as unknown as Simulation
+}
+
+export async function listSimulations(tenantId: string): Promise<Simulation[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': 'SIMULATION#',
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as Simulation[]
+}
+
+export async function deleteSimulation(tenantId: string, simulationId: string): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new DeleteCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skSimulation(simulationId) },
+    }),
+  )
 }

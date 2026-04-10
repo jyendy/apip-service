@@ -95,6 +95,8 @@ Incluye al menos: `accumulatedRevenue`, `totalCosts`, `ebitda`, `netProfit`, `ro
 
 **Body POST/PATCH asset** (campos principales): ver `openapi.yaml` y esquema Zod `createAssetBody` / `patchAssetBody`.
 
+**Regla de edición (modelo):** si el activo ya tiene hechos operativos (`RevenueFact`/`CostFact`), el backend bloquea cambios estructurales en `type`, `acquisitionDate`, `initialInvestment` y `currency` con `409 MODEL_LOCKED` para evitar romper series históricas.
+
 **Body PUT `/cash-flows`**:
 
 ```json
@@ -119,6 +121,10 @@ Incluye al menos: `accumulatedRevenue`, `totalCosts`, `ebitda`, `netProfit`, `ro
 | POST   | `/v1/imports/assets` | Crea job de importación (CSV/S3) |
 | GET    | `/v1/imports/assets/{jobId}` | Estado del job |
 | POST   | `/v1/simulations` | Simulación puntual (sin persistir activo) |
+| GET    | `/v1/simulations` | Lista simulaciones guardadas |
+| GET    | `/v1/simulations/{simulationId}` | Detalle de simulación |
+| PATCH  | `/v1/simulations/{simulationId}` | Actualiza entradas y recalcula |
+| DELETE | `/v1/simulations/{simulationId}` | Elimina simulación |
 
 ### Alerts (placeholder)
 

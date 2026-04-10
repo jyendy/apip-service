@@ -65,6 +65,7 @@ export const listQuery = z.object({
 })
 
 export const simulationBody = z.object({
+  name: z.string().min(1).optional(),
   assetType: z.enum(['transport', 'real_estate', 'machinery', 'energy', 'other']),
   initialCapital: z.number().positive(),
   expectedMonthlyRevenue: z.number().nonnegative(),
@@ -73,6 +74,8 @@ export const simulationBody = z.object({
   durationMonths: z.number().int().positive().max(600),
   discountRateAnnual: z.number().optional(),
 })
+
+export const patchSimulationBody = simulationBody.partial()
 
 export const importAssetsBody = z.object({
   fileName: z.string().min(1),

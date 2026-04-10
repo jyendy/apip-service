@@ -12,6 +12,7 @@ import {
   patchPortfolioBody,
   patchProjectBody,
   patchTenantBody,
+  patchSimulationBody,
   putAssetCashFlowsBody,
   simulationBody,
 } from '../domain/schemas'
@@ -28,7 +29,7 @@ import {
 import { computeAssetMetrics } from '../services/metrics'
 import { buildStandardizedStructure } from '../services/structure'
 import { buildInsights } from '../services/insights'
-import type { Asset, CostFact, ImportJob, Portfolio, Project, RevenueFact, Tenant } from '../domain/types'
+import type { Asset, CostFact, ImportJob, Portfolio, Project, RevenueFact, Simulation, Tenant } from '../domain/types'
 
 const BUS = process.env.EVENT_BUS_NAME
 
@@ -39,6 +40,35 @@ function parseBody<T>(raw: string | undefined): T {
 
 function segments(path: string): string[] {
   return path.replace(/\/+$/, '').split('/').filter(Boolean)
+}
+
+function computeSimulationProjection(input: {
+  initialCapital: number
+  expectedMonthlyRevenue: number
+  expectedOperatingCost: number
+  growthRatePercent?: number
+  durationMonths: number
+  discountRateAnnual?: number
+}) {
+  const growthMonthly = (input.growthRatePercent ?? 0) / 100 / 12
+  const series = buildMonthlyCashFlowSeries({
+    months: input.durationMonths,
+    monthlyRevenue: input.expectedMonthlyRevenue,
+    monthlyCosts: input.expectedOperatingCost,
+    growthRateMonthly: growthMonthly,
+    initialInvestment: input.initialCapital,
+  })
+  const nets = series.map(s => s.net)
+  const flows = [-input.initialCapital, ...nets]
+  const irr = irrMonthlyPercent(flows)
+  const npv = npvFromMonthlyFlows(nets, input.discountRateAnnual ?? 0.1)
+  const totalProfit = nets.reduce((a, s) => a + s, 0)
+  const roi = simpleRoiPercent(totalProfit, input.initialCapital)
+  const breakEvenMonth = series.findIndex((_row, i) => {
+    const cum = series.slice(0, i + 1).reduce((x, y) => x + y.net, 0)
+    return cum >= input.initialCapital
+  })
+  return { roi, irr, npv, breakEvenMonth }
 }
 
 async function ensureTenant(tenantId: string): Promise<APIGatewayProxyResultV2 | null> {
@@ -194,6 +224,22 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         if (!a) return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
         const body = patchAssetBody.safeParse(parseBody(event.body))
         if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const touchesStructuralFields =
+          body.data.type !== undefined ||
+          body.data.acquisitionDate !== undefined ||
+          body.data.initialInvestment !== undefined ||
+          body.data.currency !== undefined
+        if (touchesStructuralFields) {
+          const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
+          const cost = await repo.listCostFacts(ctx.tenantId, assetId)
+          if (rev.length > 0 || cost.length > 0) {
+            return jsonError(
+              409,
+              'MODEL_LOCKED',
+              'No se pueden cambiar type/acquisitionDate/initialInvestment/currency cuando ya existen hechos operativos para el activo',
+            )
+          }
+        }
         const now = new Date().toISOString()
         const updated: Asset = {
           ...a,
@@ -582,34 +628,79 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
 
     // --- simulations ---
     if (seg[0] === 'v1' && seg[1] === 'simulations' && seg.length === 2) {
+      if (method === 'GET') {
+        const items = await repo.listSimulations(ctx.tenantId)
+        return json(200, { items })
+      }
       if (method === 'POST') {
         const body = simulationBody.safeParse(parseBody(event.body))
         if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const b = body.data
-        const growthMonthly = (b.growthRatePercent ?? 0) / 100 / 12
-        const series = buildMonthlyCashFlowSeries({
-          months: b.durationMonths,
-          monthlyRevenue: b.expectedMonthlyRevenue,
-          monthlyCosts: b.expectedOperatingCost,
-          growthRateMonthly: growthMonthly,
-          initialInvestment: b.initialCapital,
-        })
-        const nets = series.map(s => s.net)
-        const flows = [-b.initialCapital, ...nets]
-        const irr = irrMonthlyPercent(flows)
-        const npv = npvFromMonthlyFlows(nets, b.discountRateAnnual ?? 0.1)
-        const totalProfit = nets.reduce((a, s) => a + s, 0)
-        const roi = simpleRoiPercent(totalProfit, b.initialCapital)
-        return json(200, {
-          projectedROI: roi,
-          projectedIRR: irr,
-          projectedNPV: npv,
-          breakEvenMonth: series.findIndex((_row, i) => {
-            const cum = series.slice(0, i + 1).reduce((x, y) => x + y.net, 0)
-            return cum >= b.initialCapital
-          }),
+        const now = new Date().toISOString()
+        const id = newId.simulation()
+        const projection = computeSimulationProjection(b)
+        const simulation: Simulation = {
+          id,
+          tenantId: ctx.tenantId,
+          name: b.name,
+          assetType: b.assetType,
+          initialCapital: b.initialCapital,
+          expectedMonthlyRevenue: b.expectedMonthlyRevenue,
+          expectedOperatingCost: b.expectedOperatingCost,
+          growthRatePercent: b.growthRatePercent,
+          durationMonths: b.durationMonths,
+          discountRateAnnual: b.discountRateAnnual,
+          projectedROI: projection.roi,
+          projectedIRR: projection.irr,
+          projectedNPV: projection.npv,
+          breakEvenMonth: projection.breakEvenMonth,
           calculationVersion: CALCULATION_VERSION,
+          createdAt: now,
+          updatedAt: now,
+        }
+        await repo.putSimulation(simulation)
+        return json(201, simulation)
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'simulations' && seg[2] && seg.length === 3) {
+      const simulationId = seg[2]
+      if (method === 'GET') {
+        const sim = await repo.getSimulation(ctx.tenantId, simulationId)
+        if (!sim) return jsonError(404, 'NOT_FOUND', 'Simulación no encontrada')
+        return json(200, sim)
+      }
+      if (method === 'PATCH') {
+        const sim = await repo.getSimulation(ctx.tenantId, simulationId)
+        if (!sim) return jsonError(404, 'NOT_FOUND', 'Simulación no encontrada')
+        const body = patchSimulationBody.safeParse(parseBody(event.body))
+        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const merged = { ...sim, ...body.data }
+        const projection = computeSimulationProjection({
+          initialCapital: merged.initialCapital,
+          expectedMonthlyRevenue: merged.expectedMonthlyRevenue,
+          expectedOperatingCost: merged.expectedOperatingCost,
+          growthRatePercent: merged.growthRatePercent,
+          durationMonths: merged.durationMonths,
+          discountRateAnnual: merged.discountRateAnnual,
         })
+        const updated: Simulation = {
+          ...merged,
+          projectedROI: projection.roi,
+          projectedIRR: projection.irr,
+          projectedNPV: projection.npv,
+          breakEvenMonth: projection.breakEvenMonth,
+          calculationVersion: CALCULATION_VERSION,
+          updatedAt: new Date().toISOString(),
+        }
+        await repo.putSimulation(updated)
+        return json(200, updated)
+      }
+      if (method === 'DELETE') {
+        const sim = await repo.getSimulation(ctx.tenantId, simulationId)
+        if (!sim) return jsonError(404, 'NOT_FOUND', 'Simulación no encontrada')
+        await repo.deleteSimulation(ctx.tenantId, simulationId)
+        return noContent()
       }
     }
 

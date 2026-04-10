@@ -473,15 +473,46 @@ paths:
         '200': { description: OK }
 
   /v1/simulations:
+    get:
+      summary: Listar simulaciones guardadas
+      responses:
+        '200': { description: OK }
     post:
-      summary: Simulación puntual (sin persistir)
+      summary: Crear simulación
       requestBody:
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/SimulationRequest'
       responses:
-        '200': { description: Proyección }
+        '201': { description: Creada }
+
+  /v1/simulations/{simulationId}:
+    parameters:
+      - name: simulationId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Detalle de simulación
+      responses:
+        '200': { description: OK }
+        '404': { description: No encontrada }
+    patch:
+      summary: Actualizar simulación y recalcular
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulationRequest'
+      responses:
+        '200': { description: OK }
+        '404': { description: No encontrada }
+    delete:
+      summary: Eliminar simulación
+      responses:
+        '204': { description: Sin contenido }
+        '404': { description: No encontrada }
 
   /v1/alerts:
     get:
