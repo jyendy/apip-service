@@ -36,8 +36,13 @@ export function resolvePlatformAdmin(event: APIGatewayProxyEventV2): { subject: 
 export function resolveRequestContext(event: APIGatewayProxyEventV2): RequestContext {
   const claims = getJwtClaims(event)
 
+  // Cognito: el atributo debe llamarse `tenantId` en el pool; si se definió como `custom:tenantId`,
+  // el claim puede llegar como `custom:custom:tenantId`.
   const fromClaims =
-    claims?.['custom:tenantId'] ?? claims?.tenantId ?? claims?.['custom:tenant_id']
+    claims?.['custom:tenantId'] ??
+    claims?.['custom:custom:tenantId'] ??
+    claims?.tenantId ??
+    claims?.['custom:tenant_id']
 
   if (fromClaims) {
     return { tenantId: fromClaims, subject: claims?.sub }

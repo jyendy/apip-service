@@ -34,3 +34,7 @@ Documento vivo para decisiones técnicas pendientes. Actualizar al cerrar ítems
 
 - [ ] Correlación `requestId` en logs Lambda.
 - [ ] Métricas de error 4xx/5xx por ruta.
+
+## Seguridad y repositorios
+
+- [ ] **Revisión de datos sensibles en repos** (`apip-front`, `apip-service`, `apip-policies`): inspeccionar historial y árbol actual (`.env*`, claves, tokens, secretos en YAML/CI); rotar credenciales si hubo exposición; purgar del historial lo versionado por error si aplica; validar `.gitignore`, hooks opcionales y revisión en PR/CI.
