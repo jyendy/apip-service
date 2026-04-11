@@ -17,4 +17,6 @@ export const newId = {
   ledgerEntry: () => shortId('led'),
   simulation: () => shortId('sim'),
   insight: () => shortId('ins'),
+  tmsOrder: () => shortId('tord'),
+  tmsTrip: () => shortId('trip'),
 }

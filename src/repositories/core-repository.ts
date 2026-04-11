@@ -17,6 +17,8 @@ import type {
   RevenueFact,
   Simulation,
   Tenant,
+  TransportOrder,
+  TransportTrip,
 } from '../domain/types'
 import * as keys from '../lib/keys'
 import { getDocumentClient, tableName } from './dynamo-client'
@@ -34,6 +36,8 @@ const ENTITY = {
   INVESTOR: 'INVESTOR',
   INV_LEDGER: 'INV_LEDGER',
   PROJ_ALLOC: 'PROJ_ALLOC',
+  TMS_ORDER: 'TMS_ORDER',
+  TMS_TRIP: 'TMS_TRIP',
 } as const
 
 type CoreItem = Record<string, unknown> & { PK: string; SK: string }
@@ -561,6 +565,86 @@ export async function deleteSimulation(tenantId: string, simulationId: string): 
     new DeleteCommand({
       TableName: tableName(),
       Key: { PK: keys.pkTenant(tenantId), SK: keys.skSimulation(simulationId) },
+    }),
+  )
+}
+
+export async function listTransportOrders(tenantId: string): Promise<TransportOrder[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': 'TMS#ORDER#',
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as TransportOrder[]
+}
+
+export async function getTransportOrder(tenantId: string, orderId: string): Promise<TransportOrder | null> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new GetCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skTmsOrder(orderId) },
+    }),
+  )
+  if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.TMS_ORDER) return null
+  return r.Item as unknown as TransportOrder
+}
+
+export async function putTransportOrder(o: TransportOrder): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(o.tenantId, keys.skTmsOrder(o.id), {
+        entityType: ENTITY.TMS_ORDER,
+        ...o,
+      }),
+    }),
+  )
+}
+
+export async function listTransportTrips(tenantId: string): Promise<TransportTrip[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': 'TMS#TRIP#',
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as TransportTrip[]
+}
+
+export async function getTransportTrip(tenantId: string, tripId: string): Promise<TransportTrip | null> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new GetCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skTmsTrip(tripId) },
+    }),
+  )
+  if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.TMS_TRIP) return null
+  return r.Item as unknown as TransportTrip
+}
+
+export async function putTransportTrip(t: TransportTrip): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(t.tenantId, keys.skTmsTrip(t.id), {
+        entityType: ENTITY.TMS_TRIP,
+        ...t,
+      }),
     }),
   )
 }

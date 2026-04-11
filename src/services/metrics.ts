@@ -1,3 +1,4 @@
+import { costCategoryToBucket } from '../domain/cost-categories'
 import type {
   Asset,
   AssetFinancialModel,
@@ -63,10 +64,11 @@ function buildActualByMonth(revenue: RevenueFact[], costs: CostFact[]): Map<stri
   for (const c of costs) {
     const k = monthKey(c.date)
     const x = row(k)
-    if (c.category === 'direct') x.direct += c.amount
-    else if (c.category === 'operational') x.operational += c.amount
-    else if (c.category === 'maintenance') x.maintenance += c.amount
-    else if (c.category === 'depreciation') x.depreciation += c.amount
+    const bucket = costCategoryToBucket(c.category)
+    if (bucket === 'direct') x.direct += c.amount
+    else if (bucket === 'operational') x.operational += c.amount
+    else if (bucket === 'maintenance') x.maintenance += c.amount
+    else if (bucket === 'depreciation') x.depreciation += c.amount
     else x.other += c.amount
   }
   return m

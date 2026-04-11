@@ -1,3 +1,4 @@
+import { costCategoryToBucket } from '../domain/cost-categories'
 import type { CostFact, RevenueFact } from '../domain/types'
 import type { AssetMetricsComputed } from '../domain/types'
 
@@ -18,11 +19,17 @@ export function buildStandardizedStructure(
   costs: CostFact[],
 ): { lines: StructureLine[]; operatingIncome: number } {
   const revenue = metrics.accumulatedRevenue
-  const directCosts = costs.filter(c => c.category === 'direct').reduce((s, c) => s + c.amount, 0)
-  const operationalCosts = costs.filter(c => c.category === 'operational').reduce((s, c) => s + c.amount, 0)
-  const maintenance = costs.filter(c => c.category === 'maintenance').reduce((s, c) => s + c.amount, 0)
-  const depreciation = costs.filter(c => c.category === 'depreciation').reduce((s, c) => s + c.amount, 0)
-  const other = costs.filter(c => c.category === 'other').reduce((s, c) => s + c.amount, 0)
+  const directCosts = costs.filter(c => costCategoryToBucket(c.category) === 'direct').reduce((s, c) => s + c.amount, 0)
+  const operationalCosts = costs
+    .filter(c => costCategoryToBucket(c.category) === 'operational')
+    .reduce((s, c) => s + c.amount, 0)
+  const maintenance = costs
+    .filter(c => costCategoryToBucket(c.category) === 'maintenance')
+    .reduce((s, c) => s + c.amount, 0)
+  const depreciation = costs
+    .filter(c => costCategoryToBucket(c.category) === 'depreciation')
+    .reduce((s, c) => s + c.amount, 0)
+  const other = costs.filter(c => costCategoryToBucket(c.category) === 'other').reduce((s, c) => s + c.amount, 0)
 
   const revenueFromFacts = revenueFacts.reduce((s, r) => s + r.amount, 0)
   const costFactsTotal = directCosts + operationalCosts + maintenance + depreciation + other

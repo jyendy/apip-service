@@ -7,6 +7,8 @@ import {
   createPortfolioBody,
   createProjectBody,
   createTenantBody,
+  createTransportOrderBody,
+  createTransportTripBody,
   importAssetsBody,
   investorLedgerEntryBody,
   listQuery,
@@ -16,10 +18,15 @@ import {
   patchProjectBody,
   patchTenantBody,
   patchSimulationBody,
+  patchTransportOrderBody,
+  patchTransportTripBody,
   putAssetCashFlowsBody,
   putProjectInvestorAllocationsBody,
   simulationBody,
+  tmsTripCostBody,
+  tmsTripRevenueBody,
 } from '../domain/schemas'
+import { COST_CATEGORY_CATALOG } from '../domain/cost-categories'
 import { json, jsonError, noContent } from '../lib/http'
 import { newId } from '../lib/ids'
 import { publishDomainEvent } from '../lib/events'
@@ -41,6 +48,7 @@ import {
 } from '../services/participation'
 import { buildInvestorExposure } from '../services/investors'
 import { buildAssetRegisterReport, buildInvestmentSummaryReport, buildPortfolioSnapshotReport } from '../services/reports'
+import { buildTmsSummary, isKnownCostCategory, requireTransportAsset } from '../services/tms'
 import type {
   Asset,
   CostFact,
@@ -52,6 +60,8 @@ import type {
   RevenueFact,
   Simulation,
   Tenant,
+  TransportOrder,
+  TransportTrip,
 } from '../domain/types'
 
 const BUS = process.env.EVENT_BUS_NAME
@@ -307,6 +317,17 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const cost = await repo.listCostFacts(ctx.tenantId, assetId)
         const metrics = computeAssetMetrics(a, rev, cost)
         return json(200, { assetId, cashFlow: metrics.cashFlow })
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'assets' && seg[3] === 'facts' && seg.length === 4) {
+      const assetId = seg[2]
+      if (method === 'GET') {
+        const a = await repo.getAsset(ctx.tenantId, assetId)
+        if (!a) return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
+        const revenueFacts = await repo.listRevenueFacts(ctx.tenantId, assetId)
+        const costFacts = await repo.listCostFacts(ctx.tenantId, assetId)
+        return json(200, { assetId, revenueFacts, costFacts })
       }
     }
 
@@ -958,6 +979,197 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         if (!sim) return jsonError(404, 'NOT_FOUND', 'Simulación no encontrada')
         await repo.deleteSimulation(ctx.tenantId, simulationId)
         return noContent()
+      }
+    }
+
+    // --- TMS (operacional → RevenueFact / CostFact; sin métricas en TMS) ---
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'cost-categories' && seg.length === 3) {
+      if (method === 'GET') {
+        return json(200, { items: COST_CATEGORY_CATALOG })
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'summary' && seg.length === 3) {
+      if (method === 'GET') {
+        const s = await buildTmsSummary(ctx.tenantId)
+        return json(200, s)
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'orders' && seg.length === 3) {
+      if (method === 'GET') {
+        const items = await repo.listTransportOrders(ctx.tenantId)
+        return json(200, { items })
+      }
+      if (method === 'POST') {
+        const body = createTransportOrderBody.safeParse(parseBody(event.body))
+        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const o: TransportOrder = {
+          id: newId.tmsOrder(),
+          tenantId: ctx.tenantId,
+          customerName: body.data.customerName,
+          origin: body.data.origin,
+          destination: body.data.destination,
+          cargoDescription: body.data.cargoDescription,
+          scheduledDate: body.data.scheduledDate,
+          expectedRevenue: body.data.expectedRevenue,
+          status: body.data.status ?? 'CREATED',
+          createdAt: now,
+          updatedAt: now,
+        }
+        await repo.putTransportOrder(o)
+        return json(201, o)
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'orders' && seg[3] && seg.length === 4) {
+      const orderId = seg[3]
+      if (method === 'GET') {
+        const ord = await repo.getTransportOrder(ctx.tenantId, orderId)
+        if (!ord) return jsonError(404, 'NOT_FOUND', 'Orden no encontrada')
+        return json(200, ord)
+      }
+      if (method === 'PATCH') {
+        const existing = await repo.getTransportOrder(ctx.tenantId, orderId)
+        if (!existing) return jsonError(404, 'NOT_FOUND', 'Orden no encontrada')
+        const body = patchTransportOrderBody.safeParse(parseBody(event.body))
+        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const updated: TransportOrder = { ...existing, ...body.data, updatedAt: now }
+        await repo.putTransportOrder(updated)
+        return json(200, updated)
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'trips' && seg.length === 3) {
+      if (method === 'GET') {
+        const items = await repo.listTransportTrips(ctx.tenantId)
+        return json(200, { items })
+      }
+      if (method === 'POST') {
+        const body = createTransportTripBody.safeParse(parseBody(event.body))
+        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        try {
+          await requireTransportAsset(ctx.tenantId, body.data.assetId)
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          if (msg === 'ASSET_NOT_FOUND') return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
+          if (msg === 'ASSET_NOT_TRANSPORT') return jsonError(400, 'VALIDATION', 'El activo debe ser type transport')
+          throw e
+        }
+        for (const oid of body.data.orderIds) {
+          const ord = await repo.getTransportOrder(ctx.tenantId, oid)
+          if (!ord) return jsonError(400, 'VALIDATION', `Orden no encontrada: ${oid}`)
+        }
+        const now = new Date().toISOString()
+        const t: TransportTrip = {
+          id: newId.tmsTrip(),
+          tenantId: ctx.tenantId,
+          assetId: body.data.assetId,
+          orderIds: body.data.orderIds,
+          driver: body.data.driver,
+          startDate: body.data.startDate,
+          endDate: body.data.endDate,
+          distanceKm: body.data.distanceKm,
+          status: body.data.status ?? 'PLANNED',
+          createdAt: now,
+          updatedAt: now,
+        }
+        await repo.putTransportTrip(t)
+        return json(201, t)
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'trips' && seg[3] && seg.length === 4) {
+      const tripId = seg[3]
+      if (method === 'GET') {
+        const trip = await repo.getTransportTrip(ctx.tenantId, tripId)
+        if (!trip) return jsonError(404, 'NOT_FOUND', 'Viaje no encontrado')
+        return json(200, trip)
+      }
+      if (method === 'PATCH') {
+        const existing = await repo.getTransportTrip(ctx.tenantId, tripId)
+        if (!existing) return jsonError(404, 'NOT_FOUND', 'Viaje no encontrado')
+        const body = patchTransportTripBody.safeParse(parseBody(event.body))
+        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const updated: TransportTrip = { ...existing, ...body.data, updatedAt: now }
+        await repo.putTransportTrip(updated)
+        return json(200, updated)
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'trips' && seg[3] && seg[4] === 'costs' && seg.length === 5) {
+      const tripId = seg[3]
+      if (method === 'POST') {
+        const trip = await repo.getTransportTrip(ctx.tenantId, tripId)
+        if (!trip) return jsonError(404, 'NOT_FOUND', 'Viaje no encontrado')
+        const body = tmsTripCostBody.safeParse(parseBody(event.body))
+        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (body.data.assetId !== trip.assetId) {
+          return jsonError(400, 'VALIDATION', 'assetId debe coincidir con el viaje')
+        }
+        if (!isKnownCostCategory(body.data.category)) {
+          return jsonError(400, 'VALIDATION', `Categoría de costo desconocida: ${body.data.category}`)
+        }
+        try {
+          await requireTransportAsset(ctx.tenantId, body.data.assetId)
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          if (msg === 'ASSET_NOT_FOUND') return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
+          if (msg === 'ASSET_NOT_TRANSPORT') return jsonError(400, 'VALIDATION', 'El activo debe ser type transport')
+          throw e
+        }
+        const now = new Date().toISOString()
+        const cf: CostFact = {
+          id: newId.fact(),
+          tenantId: ctx.tenantId,
+          assetId: body.data.assetId,
+          date: body.data.date,
+          amount: body.data.amount,
+          category: body.data.category,
+          source: 'api',
+          createdAt: now,
+          sourceRef: { kind: 'tms_trip', id: tripId },
+        }
+        await repo.putCostFact(cf)
+        return json(201, cf)
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'trips' && seg[3] && seg[4] === 'revenue' && seg.length === 5) {
+      const tripId = seg[3]
+      if (method === 'POST') {
+        const trip = await repo.getTransportTrip(ctx.tenantId, tripId)
+        if (!trip) return jsonError(404, 'NOT_FOUND', 'Viaje no encontrado')
+        const body = tmsTripRevenueBody.safeParse(parseBody(event.body))
+        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (body.data.assetId !== trip.assetId) {
+          return jsonError(400, 'VALIDATION', 'assetId debe coincidir con el viaje')
+        }
+        try {
+          await requireTransportAsset(ctx.tenantId, body.data.assetId)
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          if (msg === 'ASSET_NOT_FOUND') return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
+          if (msg === 'ASSET_NOT_TRANSPORT') return jsonError(400, 'VALIDATION', 'El activo debe ser type transport')
+          throw e
+        }
+        const now = new Date().toISOString()
+        const rf: RevenueFact = {
+          id: newId.fact(),
+          tenantId: ctx.tenantId,
+          assetId: body.data.assetId,
+          date: body.data.date,
+          amount: body.data.amount,
+          category: 'tms_revenue',
+          source: 'api',
+          createdAt: now,
+          sourceRef: { kind: 'tms_trip', id: tripId },
+        }
+        await repo.putRevenueFact(rf)
+        return json(201, rf)
       }
     }
 

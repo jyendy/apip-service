@@ -33,6 +33,10 @@ export const skInvestorLedger = (investorId: string, entryId: string) =>
 export const skProjectAllocation = (projectId: string, investorId: string) =>
   `PROJALLOC#${projectId}#${investorId}`
 
+export const skTmsOrder = (orderId: string) => `TMS#ORDER#${orderId}`
+
+export const skTmsTrip = (tripId: string) => `TMS#TRIP#${tripId}`
+
 /** GSI1: listar activos por proyecto */
 export const gsi1pkProjectAssets = (tenantId: string, projectId: string) =>
   `TENANT#${tenantId}#PROJECT#${projectId}`

@@ -127,6 +127,50 @@ export const putProjectInvestorAllocationsBody = z.object({
   ),
 })
 
+export const createTransportOrderBody = z.object({
+  customerName: z.string().min(1),
+  origin: z.string().min(1),
+  destination: z.string().min(1),
+  cargoDescription: z.string().min(1),
+  scheduledDate: z.string().datetime(),
+  expectedRevenue: z.number().nonnegative(),
+  status: z.enum(['CREATED', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED']).optional(),
+})
+
+export const patchTransportOrderBody = createTransportOrderBody.partial()
+
+export const createTransportTripBody = z.object({
+  assetId: z.string().min(1),
+  orderIds: z.array(z.string().min(1)).min(1),
+  driver: z.string().min(1),
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
+  distanceKm: z.number().nonnegative().optional(),
+  status: z.enum(['PLANNED', 'IN_PROGRESS', 'COMPLETED']).optional(),
+})
+
+export const patchTransportTripBody = z.object({
+  driver: z.string().min(1).optional(),
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
+  distanceKm: z.number().nonnegative().optional(),
+  status: z.enum(['PLANNED', 'IN_PROGRESS', 'COMPLETED']).optional(),
+  orderIds: z.array(z.string().min(1)).optional(),
+})
+
+export const tmsTripCostBody = z.object({
+  assetId: z.string().min(1),
+  date: z.string().datetime(),
+  category: z.string().min(1),
+  amount: z.number().positive(),
+})
+
+export const tmsTripRevenueBody = z.object({
+  assetId: z.string().min(1),
+  date: z.string().datetime(),
+  amount: z.number().positive(),
+})
+
 export const putAssetCashFlowsBody = z.object({
   periods: z
     .array(

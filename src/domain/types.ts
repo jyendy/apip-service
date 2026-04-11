@@ -81,6 +81,7 @@ export type CapitalEvent = {
 
 export type FactSource = 'manual' | 'import' | 'api'
 
+/** Hechos de ingreso; `category` libre (p. ej. tms, monthly). */
 export type RevenueFact = {
   id: string
   tenantId: string
@@ -90,19 +91,20 @@ export type RevenueFact = {
   category: string
   source: FactSource
   createdAt: string
+  sourceRef?: { kind: 'tms_trip' | 'tms_order'; id: string }
 }
 
-export type CostCategory = 'direct' | 'operational' | 'maintenance' | 'depreciation' | 'other'
-
+/** Código del catálogo (`cost-categories.ts`); el motor agrupa vía `costCategoryToBucket`. */
 export type CostFact = {
   id: string
   tenantId: string
   assetId: string
   date: string
   amount: number
-  category: CostCategory
+  category: string
   source: FactSource
   createdAt: string
+  sourceRef?: { kind: 'tms_trip' | 'tms_order'; id: string }
 }
 
 export type InvestorRole = 'limited_partner' | 'general_partner' | 'advisor' | 'stakeholder' | 'other'
@@ -237,4 +239,38 @@ export type AssetMetricsComputed = {
   dataMode: MetricsDataMode
   coverage: MetricsCoverage
   calculationVersion: string
+}
+
+/** TMS — orden de transporte (operacional; no métricas financieras). */
+export type TransportOrderStatus = 'CREATED' | 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED'
+
+export type TransportOrder = {
+  id: string
+  tenantId: string
+  customerName: string
+  origin: string
+  destination: string
+  cargoDescription: string
+  scheduledDate: string
+  expectedRevenue: number
+  status: TransportOrderStatus
+  createdAt: string
+  updatedAt: string
+}
+
+/** TMS — viaje de ejecución vinculado a activo transport. */
+export type TransportTripStatus = 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED'
+
+export type TransportTrip = {
+  id: string
+  tenantId: string
+  assetId: string
+  orderIds: string[]
+  driver: string
+  startDate?: string
+  endDate?: string
+  distanceKm?: number
+  status: TransportTripStatus
+  createdAt: string
+  updatedAt: string
 }
