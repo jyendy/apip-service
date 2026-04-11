@@ -163,6 +163,22 @@ export type PortfolioCapitalParticipation = {
     allocatedAmount: number
     percentOfDeployed: number
   }>
+  /**
+   * Desglose por proyecto: misma información que en la vista de proyecto, agregada por LP.
+   * Las asignaciones se siguen editando solo a nivel proyecto.
+   */
+  investorExposureByProject: Array<{
+    investorId: string
+    investorName: string
+    allocatedTotal: number
+    percentOfPortfolioDeployed: number
+    byProject: Array<{
+      projectId: string
+      projectName: string
+      amount: number
+      percentOfProjectDeployed: number
+    }>
+  }>
 }
 
 export async function buildPortfolioCapitalParticipation(
@@ -175,6 +191,10 @@ export async function buildPortfolioCapitalParticipation(
   const projects = (await repo.listProjects(tenantId, portfolioId)).sort((a, b) => a.name.localeCompare(b.name))
   const projectSummaries: PortfolioCapitalParticipation['projects'] = []
   const investorTotals = new Map<string, number>()
+  const investorByProject = new Map<
+    string,
+    Array<{ projectId: string; projectName: string; amount: number; projectDeployed: number }>
+  >()
 
   let deployedTotal = 0
   let unassignedTotal = 0
@@ -188,6 +208,14 @@ export async function buildPortfolioCapitalParticipation(
     unassignedTotal += unassigned
     for (const a of allocs) {
       investorTotals.set(a.investorId, (investorTotals.get(a.investorId) ?? 0) + a.amount)
+      const list = investorByProject.get(a.investorId) ?? []
+      list.push({
+        projectId: p.id,
+        projectName: p.name,
+        amount: a.amount,
+        projectDeployed: dep,
+      })
+      investorByProject.set(a.investorId, list)
     }
     projectSummaries.push({
       projectId: p.id,
@@ -209,12 +237,36 @@ export async function buildPortfolioCapitalParticipation(
     })
   }
 
+  const investorExposureByProject: PortfolioCapitalParticipation['investorExposureByProject'] = []
+  for (const [investorId, allocatedTotal] of [...investorTotals.entries()].sort((a, b) => b[1] - a[1])) {
+    const inv = await repo.getInvestor(tenantId, investorId)
+    const rawRows = investorByProject.get(investorId) ?? []
+    const byProject = [...rawRows]
+      .map(r => ({
+        projectId: r.projectId,
+        projectName: r.projectName,
+        amount: r.amount,
+        percentOfProjectDeployed:
+          r.projectDeployed > 0 ? (r.amount / r.projectDeployed) * 100 : 0,
+      }))
+      .sort((a, b) => b.amount - a.amount)
+    investorExposureByProject.push({
+      investorId,
+      investorName: inv?.name ?? investorId,
+      allocatedTotal,
+      percentOfPortfolioDeployed:
+        deployedTotal > 0 ? (allocatedTotal / deployedTotal) * 100 : 0,
+      byProject,
+    })
+  }
+
   return {
     portfolioId,
     deployedCapital: deployedTotal,
     unassignedAmount: unassignedTotal,
     projects: projectSummaries,
     byInvestor,
+    investorExposureByProject,
   }
 }
 
