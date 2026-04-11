@@ -13,6 +13,8 @@ export const newId = {
   fact: () => shortId('fact'),
   capital: () => shortId('cap'),
   importJob: () => shortId('imp'),
+  investor: () => shortId('inv'),
+  ledgerEntry: () => shortId('led'),
   simulation: () => shortId('sim'),
   insight: () => shortId('ins'),
 }

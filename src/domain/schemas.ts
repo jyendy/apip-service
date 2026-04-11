@@ -77,9 +77,54 @@ export const simulationBody = z.object({
 
 export const patchSimulationBody = simulationBody.partial()
 
-export const importAssetsBody = z.object({
-  fileName: z.string().min(1),
-  templateVersion: z.string().optional(),
+const importAssetRowSchema = z.object({
+  portfolioId: z.string().min(1),
+  projectId: z.string().min(1),
+  name: z.string().min(1),
+  type: z.enum(['transport', 'real_estate', 'machinery', 'energy', 'other']),
+  acquisitionDate: z.string().datetime(),
+  initialInvestment: z.number(),
+  currency: z.string().length(3).optional(),
+  status: z.enum(['active', 'inactive', 'maintenance', 'sold']).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  financialModel: financialModelSchema,
+})
+
+export const importAssetsBody = z
+  .object({
+    fileName: z.string().min(1).optional(),
+    templateVersion: z.string().optional(),
+    rows: z.array(importAssetRowSchema).max(500).optional(),
+  })
+  .refine(b => !!(b.fileName && b.fileName.length > 0) || !!(b.rows && b.rows.length > 0), {
+    message: 'Indica fileName (job registrado) o rows (importación síncrona de activos)',
+  })
+
+export const createInvestorBody = z.object({
+  name: z.string().min(1),
+  role: z.enum(['limited_partner', 'general_partner', 'advisor', 'stakeholder', 'other']),
+  email: z.string().email().optional(),
+  portfolioIds: z.array(z.string().min(1)).default([]),
+  committedCapital: z.number().nonnegative().optional(),
+  notes: z.string().optional(),
+})
+
+export const patchInvestorBody = createInvestorBody.partial()
+
+export const investorLedgerEntryBody = z.object({
+  type: z.enum(['contribution', 'distribution']),
+  amount: z.number().positive(),
+  occurredAt: z.string().datetime(),
+  note: z.string().optional(),
+})
+
+export const putProjectInvestorAllocationsBody = z.object({
+  allocations: z.array(
+    z.object({
+      investorId: z.string().min(1),
+      amount: z.number().nonnegative(),
+    }),
+  ),
 })
 
 export const putAssetCashFlowsBody = z.object({

@@ -23,6 +23,16 @@ export const skImportJob = (jobId: string) => `IMPORT#${jobId}`
 
 export const skSimulation = (simulationId: string) => `SIMULATION#${simulationId}`
 
+export const skInvestor = (investorId: string) => `INVESTOR#${investorId}`
+
+/** Ledger inmutable por inversionista: SK INV#invId#LEDGER#entryId */
+export const skInvestorLedger = (investorId: string, entryId: string) =>
+  `INV#${investorId}#LEDGER#${entryId}`
+
+/** Asignación de capital LP a proyecto: un item por (projectId, investorId) */
+export const skProjectAllocation = (projectId: string, investorId: string) =>
+  `PROJALLOC#${projectId}#${investorId}`
+
 /** GSI1: listar activos por proyecto */
 export const gsi1pkProjectAssets = (tenantId: string, projectId: string) =>
   `TENANT#${tenantId}#PROJECT#${projectId}`

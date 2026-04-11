@@ -3,17 +3,21 @@ import { resolvePlatformAdmin, resolveRequestContext } from '../auth/context'
 import * as repo from '../repositories/core-repository'
 import {
   createAssetBody,
+  createInvestorBody,
   createPortfolioBody,
   createProjectBody,
   createTenantBody,
   importAssetsBody,
+  investorLedgerEntryBody,
   listQuery,
   patchAssetBody,
+  patchInvestorBody,
   patchPortfolioBody,
   patchProjectBody,
   patchTenantBody,
   patchSimulationBody,
   putAssetCashFlowsBody,
+  putProjectInvestorAllocationsBody,
   simulationBody,
 } from '../domain/schemas'
 import { json, jsonError, noContent } from '../lib/http'
@@ -29,7 +33,26 @@ import {
 import { computeAssetMetrics } from '../services/metrics'
 import { buildStandardizedStructure } from '../services/structure'
 import { buildInsights } from '../services/insights'
-import type { Asset, CostFact, ImportJob, Portfolio, Project, RevenueFact, Simulation, Tenant } from '../domain/types'
+import {
+  buildInvestorCapitalAccount,
+  buildPortfolioCapitalParticipation,
+  buildProjectCapitalParticipation,
+  validateAndReplaceProjectAllocations,
+} from '../services/participation'
+import { buildInvestorExposure } from '../services/investors'
+import { buildAssetRegisterReport, buildInvestmentSummaryReport, buildPortfolioSnapshotReport } from '../services/reports'
+import type {
+  Asset,
+  CostFact,
+  ImportJob,
+  Investor,
+  InvestorLedgerEntry,
+  Portfolio,
+  Project,
+  RevenueFact,
+  Simulation,
+  Tenant,
+} from '../domain/types'
 
 const BUS = process.env.EVENT_BUS_NAME
 
@@ -441,6 +464,15 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       }
     }
 
+    if (seg[0] === 'v1' && seg[1] === 'portfolios' && seg[3] === 'capital-participation' && seg.length === 4) {
+      const portfolioId = seg[2]
+      if (method === 'GET') {
+        const view = await buildPortfolioCapitalParticipation(ctx.tenantId, portfolioId)
+        if (!view) return jsonError(404, 'NOT_FOUND', 'Portfolio no encontrado')
+        return json(200, view)
+      }
+    }
+
     // --- projects ---
     if (seg[0] === 'v1' && seg[1] === 'projects' && seg.length === 2) {
       if (method === 'GET') {
@@ -524,6 +556,39 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       }
     }
 
+    if (seg[0] === 'v1' && seg[1] === 'projects' && seg[3] === 'investor-allocations' && seg.length === 4) {
+      const projectId = seg[2]
+      if (method === 'PUT') {
+        const body = putProjectInvestorAllocationsBody.safeParse(parseBody(event.body))
+        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        try {
+          await validateAndReplaceProjectAllocations(ctx.tenantId, projectId, body.data.allocations)
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          if (
+            msg.includes('ALLOC_') ||
+            msg.includes('INVESTOR_NOT_FOUND') ||
+            msg.includes('DUPLICATE_') ||
+            msg.includes('PROJECT_NOT_FOUND')
+          ) {
+            return jsonError(400, 'VALIDATION', msg)
+          }
+          throw e
+        }
+        const view = await buildProjectCapitalParticipation(ctx.tenantId, projectId)
+        return json(200, view)
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'projects' && seg[3] === 'capital-participation' && seg.length === 4) {
+      const projectId = seg[2]
+      if (method === 'GET') {
+        const view = await buildProjectCapitalParticipation(ctx.tenantId, projectId)
+        if (!view) return jsonError(404, 'NOT_FOUND', 'Proyecto no encontrado')
+        return json(200, view)
+      }
+    }
+
     // --- dashboard / insights ---
     if (seg[0] === 'v1' && seg[1] === 'dashboard' && seg[2] === 'executive' && seg.length === 3) {
       if (method === 'GET') {
@@ -597,18 +662,210 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       }
     }
 
+    // --- reports (JSON para UI y exportación CSV en cliente) ---
+    if (seg[0] === 'v1' && seg[1] === 'reports' && seg.length === 3) {
+      const kind = seg[2]
+      if (method === 'GET') {
+        if (kind === 'investment-summary') {
+          const rep = await buildInvestmentSummaryReport(ctx.tenantId)
+          return json(200, rep)
+        }
+        if (kind === 'asset-register') {
+          const rep = await buildAssetRegisterReport(ctx.tenantId)
+          return json(200, rep)
+        }
+        if (kind === 'portfolio-snapshot') {
+          const rep = await buildPortfolioSnapshotReport(ctx.tenantId)
+          return json(200, rep)
+        }
+      }
+    }
+
+    // --- investors ---
+    if (seg[0] === 'v1' && seg[1] === 'investors' && seg.length === 2) {
+      if (method === 'GET') {
+        const items = await repo.listInvestors(ctx.tenantId)
+        return json(200, { items })
+      }
+      if (method === 'POST') {
+        const body = createInvestorBody.safeParse(parseBody(event.body))
+        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const inv: Investor = {
+          id: newId.investor(),
+          tenantId: ctx.tenantId,
+          name: body.data.name,
+          role: body.data.role,
+          email: body.data.email,
+          portfolioIds: body.data.portfolioIds ?? [],
+          committedCapital: body.data.committedCapital,
+          notes: body.data.notes,
+          createdAt: now,
+          updatedAt: now,
+        }
+        await repo.putInvestor(inv)
+        return json(201, inv)
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'investors' && seg[2] && seg.length === 3) {
+      const investorId = seg[2]
+      if (method === 'GET') {
+        const inv = await repo.getInvestor(ctx.tenantId, investorId)
+        if (!inv) return jsonError(404, 'NOT_FOUND', 'Inversionista no encontrado')
+        return json(200, inv)
+      }
+      if (method === 'PATCH') {
+        const existing = await repo.getInvestor(ctx.tenantId, investorId)
+        if (!existing) return jsonError(404, 'NOT_FOUND', 'Inversionista no encontrado')
+        const body = patchInvestorBody.safeParse(parseBody(event.body))
+        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const updated: Investor = { ...existing, ...body.data, updatedAt: now }
+        await repo.putInvestor(updated)
+        return json(200, updated)
+      }
+      if (method === 'DELETE') {
+        const existing = await repo.getInvestor(ctx.tenantId, investorId)
+        if (!existing) return jsonError(404, 'NOT_FOUND', 'Inversionista no encontrado')
+        await repo.deleteInvestor(ctx.tenantId, investorId)
+        return noContent()
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'investors' && seg[2] && seg[3] === 'ledger' && seg.length === 4) {
+      const investorId = seg[2]
+      if (method === 'GET') {
+        const entries = await repo.listInvestorLedgerEntries(ctx.tenantId, investorId)
+        const items = [...entries].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
+        return json(200, { items })
+      }
+      if (method === 'POST') {
+        const inv = await repo.getInvestor(ctx.tenantId, investorId)
+        if (!inv) return jsonError(404, 'NOT_FOUND', 'Inversionista no encontrado')
+        const body = investorLedgerEntryBody.safeParse(parseBody(event.body))
+        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const entry: InvestorLedgerEntry = {
+          id: newId.ledgerEntry(),
+          tenantId: ctx.tenantId,
+          investorId,
+          type: body.data.type,
+          amount: body.data.amount,
+          occurredAt: body.data.occurredAt,
+          note: body.data.note,
+          createdAt: now,
+        }
+        await repo.putInvestorLedgerEntry(entry)
+        return json(201, entry)
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'investors' && seg[2] && seg[3] === 'capital-account' && seg.length === 4) {
+      const investorId = seg[2]
+      if (method === 'GET') {
+        const inv = await repo.getInvestor(ctx.tenantId, investorId)
+        if (!inv) return jsonError(404, 'NOT_FOUND', 'Inversionista no encontrado')
+        const acc = await buildInvestorCapitalAccount(ctx.tenantId, inv)
+        return json(200, acc)
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'investors' && seg[2] && seg[3] === 'exposure' && seg.length === 4) {
+      const investorId = seg[2]
+      if (method === 'GET') {
+        const inv = await repo.getInvestor(ctx.tenantId, investorId)
+        if (!inv) return jsonError(404, 'NOT_FOUND', 'Inversionista no encontrado')
+        const exp = await buildInvestorExposure(ctx.tenantId, inv)
+        return json(200, exp)
+      }
+    }
+
     // --- imports ---
     if (seg[0] === 'v1' && seg[1] === 'imports' && seg[2] === 'assets' && seg.length === 3) {
       if (method === 'POST') {
         const body = importAssetsBody.safeParse(parseBody(event.body))
         if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const b = body.data
+
+        if (b.rows && b.rows.length > 0) {
+          const now = new Date().toISOString()
+          const job: ImportJob = {
+            id: newId.importJob(),
+            tenantId: ctx.tenantId,
+            status: 'PROCESSING',
+            fileKey: b.fileName ?? 'inline-rows',
+            templateVersion: b.templateVersion,
+            totalRows: b.rows.length,
+            createdAt: now,
+            updatedAt: now,
+          }
+          await repo.putImportJob(job)
+          const created: Asset[] = []
+          const errors: { index: number; message: string }[] = []
+          for (let i = 0; i < b.rows.length; i++) {
+            const row = b.rows[i]
+            try {
+              const pf = await repo.getPortfolio(ctx.tenantId, row.portfolioId)
+              if (!pf) throw new Error('portfolioId no existe')
+              const pj = await repo.getProject(ctx.tenantId, row.projectId)
+              if (!pj || pj.portfolioId !== row.portfolioId) {
+                throw new Error('projectId no existe o no pertenece al portfolio')
+              }
+              const asset: Asset = {
+                id: newId.asset(),
+                tenantId: ctx.tenantId,
+                portfolioId: row.portfolioId,
+                projectId: row.projectId,
+                name: row.name,
+                type: row.type,
+                acquisitionDate: row.acquisitionDate,
+                initialInvestment: row.initialInvestment,
+                currency: row.currency ?? 'USD',
+                status: row.status ?? 'active',
+                metadata: row.metadata,
+                financialModel: row.financialModel,
+                createdAt: now,
+                updatedAt: now,
+              }
+              await repo.putAsset(asset)
+              await publishDomainEvent(BUS, 'apip.service', {
+                tenantId: ctx.tenantId,
+                type: 'AssetCreated',
+                payload: { assetId: asset.id },
+              })
+              created.push(asset)
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e)
+              errors.push({ index: i, message: msg })
+            }
+          }
+          const okRows = created.length
+          const errorRows = errors.length
+          const finalStatus: ImportJob['status'] =
+            errorRows === 0 ? 'COMPLETED' : okRows === 0 ? 'FAILED' : 'PARTIAL'
+          await repo.putImportJob({
+            ...job,
+            status: finalStatus,
+            okRows,
+            errorRows,
+            updatedAt: new Date().toISOString(),
+          })
+          return json(200, {
+            jobId: job.id,
+            status: finalStatus,
+            created,
+            errors,
+          })
+        }
+
         const now = new Date().toISOString()
         const job: ImportJob = {
           id: newId.importJob(),
           tenantId: ctx.tenantId,
           status: 'PENDING',
-          fileKey: body.data.fileName,
-          templateVersion: body.data.templateVersion,
+          fileKey: b.fileName!,
+          templateVersion: b.templateVersion,
           createdAt: now,
           updatedAt: now,
         }

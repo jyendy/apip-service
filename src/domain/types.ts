@@ -105,7 +105,50 @@ export type CostFact = {
   createdAt: string
 }
 
-export type ImportJobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
+export type InvestorRole = 'limited_partner' | 'general_partner' | 'advisor' | 'stakeholder' | 'other'
+
+/** Aporte o devolución de fondos al inversionista (inmutable, auditado). Montos en moneda del portfolio. */
+export type InvestorLedgerEntryType = 'contribution' | 'distribution'
+
+export type InvestorLedgerEntry = {
+  id: string
+  tenantId: string
+  investorId: string
+  type: InvestorLedgerEntryType
+  /** Siempre positivo; contribution aumenta saldo en manos del fondo, distribution lo reduce. */
+  amount: number
+  occurredAt: string
+  note?: string
+  createdAt: string
+}
+
+/** Asignación de capital del LP a un proyecto (no granular por activo en MVP). */
+export type ProjectInvestorAllocation = {
+  tenantId: string
+  projectId: string
+  investorId: string
+  amount: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** Parte interesada (LP, GP, asesor) vinculada a una o más carteras para vistas de exposición. */
+export type Investor = {
+  id: string
+  tenantId: string
+  name: string
+  role: InvestorRole
+  email?: string
+  /** Carteras con las que se asocia el inversionista (exposición agregada). */
+  portfolioIds: string[]
+  /** Compromiso de capital declarado (opcional; no validado contra activos). */
+  committedCapital?: number
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type ImportJobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'PARTIAL'
 
 export type ImportJob = {
   id: string

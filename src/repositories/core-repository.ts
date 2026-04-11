@@ -9,8 +9,11 @@ import type {
   Asset,
   CostFact,
   ImportJob,
+  Investor,
+  InvestorLedgerEntry,
   Portfolio,
   Project,
+  ProjectInvestorAllocation,
   RevenueFact,
   Simulation,
   Tenant,
@@ -28,6 +31,9 @@ const ENTITY = {
   COST_FACT: 'COST_FACT',
   IMPORT: 'IMPORT',
   SIMULATION: 'SIMULATION',
+  INVESTOR: 'INVESTOR',
+  INV_LEDGER: 'INV_LEDGER',
+  PROJ_ALLOC: 'PROJ_ALLOC',
 } as const
 
 type CoreItem = Record<string, unknown> & { PK: string; SK: string }
@@ -341,6 +347,147 @@ export async function deleteFactsForAsset(tenantId: string, assetId: string): Pr
       }),
     )
   }
+}
+
+export async function putInvestor(inv: Investor): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(inv.tenantId, keys.skInvestor(inv.id), {
+        entityType: ENTITY.INVESTOR,
+        ...inv,
+      }),
+    }),
+  )
+}
+
+export async function getInvestor(tenantId: string, investorId: string): Promise<Investor | null> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new GetCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skInvestor(investorId) },
+    }),
+  )
+  if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.INVESTOR) return null
+  return r.Item as unknown as Investor
+}
+
+export async function listInvestors(tenantId: string): Promise<Investor[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': 'INVESTOR#',
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as Investor[]
+}
+
+export async function putInvestorLedgerEntry(e: InvestorLedgerEntry): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(e.tenantId, keys.skInvestorLedger(e.investorId, e.id), {
+        entityType: ENTITY.INV_LEDGER,
+        ...e,
+      }),
+    }),
+  )
+}
+
+export async function listInvestorLedgerEntries(tenantId: string, investorId: string): Promise<InvestorLedgerEntry[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': `INV#${investorId}#LEDGER#`,
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as InvestorLedgerEntry[]
+}
+
+export async function putProjectInvestorAllocation(a: ProjectInvestorAllocation): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(a.tenantId, keys.skProjectAllocation(a.projectId, a.investorId), {
+        entityType: ENTITY.PROJ_ALLOC,
+        ...a,
+      }),
+    }),
+  )
+}
+
+export async function deleteProjectInvestorAllocation(
+  tenantId: string,
+  projectId: string,
+  investorId: string,
+): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new DeleteCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skProjectAllocation(projectId, investorId) },
+    }),
+  )
+}
+
+export async function listProjectInvestorAllocations(
+  tenantId: string,
+  projectId: string,
+): Promise<ProjectInvestorAllocation[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': `PROJALLOC#${projectId}#`,
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as ProjectInvestorAllocation[]
+}
+
+export async function deleteInvestor(tenantId: string, investorId: string): Promise<void> {
+  const ledgers = await listInvestorLedgerEntries(tenantId, investorId)
+  const ddb = getDocumentClient()
+  for (const e of ledgers) {
+    await ddb.send(
+      new DeleteCommand({
+        TableName: tableName(),
+        Key: { PK: keys.pkTenant(tenantId), SK: keys.skInvestorLedger(e.investorId, e.id) },
+      }),
+    )
+  }
+  const projects = await listProjects(tenantId)
+  for (const p of projects) {
+    const allocs = await listProjectInvestorAllocations(tenantId, p.id)
+    for (const a of allocs) {
+      if (a.investorId === investorId) {
+        await deleteProjectInvestorAllocation(tenantId, p.id, investorId)
+      }
+    }
+  }
+  await ddb.send(
+    new DeleteCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skInvestor(investorId) },
+    }),
+  )
 }
 
 export async function putImportJob(job: ImportJob): Promise<void> {
