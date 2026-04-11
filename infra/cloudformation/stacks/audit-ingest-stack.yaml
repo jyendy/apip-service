@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Lambda que consume eventos apip.audit / AuditRecord del bus default y escribe en apip-audit.
+
+Parameters:
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket with Lambda deployment ZIP (mismo artefacto que apip-api; incluye audit-ingest.handler).
+  LambdaCodeKey:
+    Type: String
+    Description: S3 key of the ZIP.
+
+Resources:
+  ApipAuditIngestRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: apip-audit-ingest-lambda
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ApipAuditIngestDynamo
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource:
+                  Fn::ImportValue: apip-audit-table-arn
+
+  ApipAuditIngestFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: apip-audit-ingest
+      Runtime: nodejs20.x
+      Handler: audit-ingest.handler
+      Role: !GetAtt ApipAuditIngestRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          APIP_AUDIT_TABLE_NAME:
+            Fn::ImportValue: apip-audit-table-name
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref LambdaCodeKey
+
+  ApipAuditIngestRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: apip-audit-ingest
+      Description: Persiste eventos de auditoría en DynamoDB
+      EventBusName: default
+      State: ENABLED
+      EventPattern:
+        source:
+          - apip.audit
+        detail-type:
+          - AuditRecord
+      Targets:
+        - Arn: !GetAtt ApipAuditIngestFunction.Arn
+          Id: ApipAuditIngestTarget
+
+  ApipAuditIngestInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApipAuditIngestFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ApipAuditIngestRule.Arn
+
+Outputs:
+  AuditIngestFunctionArn:
+    Description: ARN de la Lambda de ingesta de auditoría
+    Value: !GetAtt ApipAuditIngestFunction.Arn

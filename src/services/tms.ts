@@ -1,6 +1,30 @@
 import { COST_CATEGORY_CATALOG } from '../domain/cost-categories'
 import * as repo from '../repositories/core-repository'
-import type { Asset } from '../domain/types'
+import type { Asset, TmsLocality } from '../domain/types'
+
+export function formatTmsLocalityLabel(l: TmsLocality): string {
+  const tail = [l.region, l.country].filter(Boolean).join(', ')
+  return tail ? `${l.name} (${tail})` : l.name
+}
+
+export async function resolveTransportOrderDenorm(
+  tenantId: string,
+  input: { customerId: string; originLocalityId: string; destinationLocalityId: string },
+): Promise<{ customerName: string; originLabel: string; destinationLabel: string }> {
+  const [c, o, d] = await Promise.all([
+    repo.getTmsCustomer(tenantId, input.customerId),
+    repo.getTmsLocality(tenantId, input.originLocalityId),
+    repo.getTmsLocality(tenantId, input.destinationLocalityId),
+  ])
+  if (!c) throw new Error('TMS_CUSTOMER_NOT_FOUND')
+  if (!o) throw new Error('TMS_LOCALITY_NOT_FOUND')
+  if (!d) throw new Error('TMS_LOCALITY_NOT_FOUND')
+  return {
+    customerName: c.name,
+    originLabel: formatTmsLocalityLabel(o),
+    destinationLabel: formatTmsLocalityLabel(d),
+  }
+}
 
 export function isKnownCostCategory(code: string): boolean {
   return COST_CATEGORY_CATALOG.some(c => c.code === code)

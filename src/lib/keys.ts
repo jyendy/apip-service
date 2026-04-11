@@ -37,6 +37,14 @@ export const skTmsOrder = (orderId: string) => `TMS#ORDER#${orderId}`
 
 export const skTmsTrip = (tripId: string) => `TMS#TRIP#${tripId}`
 
+export const skTmsCustomer = (customerId: string) => `TMS#CUSTOMER#${customerId}`
+
+export const skTmsLocality = (localityId: string) => `TMS#LOCALITY#${localityId}`
+
+export const skAccessRole = (roleId: string) => `ROLE#${roleId}`
+
+export const skUserProfile = (cognitoSub: string) => `USER#${cognitoSub}`
+
 /** GSI1: listar activos por proyecto */
 export const gsi1pkProjectAssets = (tenantId: string, projectId: string) =>
   `TENANT#${tenantId}#PROJECT#${projectId}`

@@ -65,6 +65,42 @@ Resources:
         - AttributeName: SK
           KeyType: RANGE
 
+  ApipAccessRolesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: apip-access-roles
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+  ApipUserProfilesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: apip-user-profiles
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
 Outputs:
   CoreTableName:
     Description: Core single-table name
@@ -86,3 +122,27 @@ Outputs:
     Value: !GetAtt ApipAuditTable.Arn
     Export:
       Name: apip-audit-table-arn
+
+  AccessRolesTableName:
+    Description: Access roles table name
+    Value: !Ref ApipAccessRolesTable
+    Export:
+      Name: apip-access-roles-table-name
+
+  AccessRolesTableArn:
+    Description: Access roles table ARN
+    Value: !GetAtt ApipAccessRolesTable.Arn
+    Export:
+      Name: apip-access-roles-table-arn
+
+  UserProfilesTableName:
+    Description: User profiles table name
+    Value: !Ref ApipUserProfilesTable
+    Export:
+      Name: apip-user-profiles-table-name
+
+  UserProfilesTableArn:
+    Description: User profiles table ARN
+    Value: !GetAtt ApipUserProfilesTable.Arn
+    Export:
+      Name: apip-user-profiles-table-arn

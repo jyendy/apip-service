@@ -244,12 +244,40 @@ export type AssetMetricsComputed = {
 /** TMS — orden de transporte (operacional; no métricas financieras). */
 export type TransportOrderStatus = 'CREATED' | 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED'
 
+/** Catálogo TMS — cliente (tenant-scoped en apip-core). */
+export type TmsCustomer = {
+  id: string
+  tenantId: string
+  name: string
+  taxId?: string
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Catálogo TMS — localidad (origen/destino). */
+export type TmsLocality = {
+  id: string
+  tenantId: string
+  name: string
+  region?: string
+  country?: string
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export type TransportOrder = {
   id: string
   tenantId: string
+  /** Ausente en órdenes legado (texto libre previo a catálogos). */
+  customerId?: string
+  originLocalityId?: string
+  destinationLocalityId?: string
+  /** Denormalizado al guardar desde catálogo (listados sin joins). */
   customerName: string
-  origin: string
-  destination: string
+  originLabel: string
+  destinationLabel: string
   cargoDescription: string
   scheduledDate: string
   expectedRevenue: number
@@ -271,6 +299,31 @@ export type TransportTrip = {
   endDate?: string
   distanceKm?: number
   status: TransportTripStatus
+  createdAt: string
+  updatedAt: string
+}
+
+/** Rol de acceso por tenant; `permissionKeys` alineados al catálogo en `permission-keys.ts`. */
+export type AccessRole = {
+  id: string
+  tenantId: string
+  name: string
+  description?: string
+  permissionKeys: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+/** Perfil de usuario enlazado a Cognito (`cognitoSub`); datos personales y asignación de roles. */
+export type TenantUserProfile = {
+  tenantId: string
+  cognitoSub: string
+  email?: string
+  displayName?: string
+  photoUrl?: string
+  preferences?: Record<string, unknown>
+  /** IDs de roles definidos en `AccessRole` para este tenant. */
+  roleIds: string[]
   createdAt: string
   updatedAt: string
 }

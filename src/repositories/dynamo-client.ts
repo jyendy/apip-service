@@ -22,3 +22,15 @@ export function tableName(): string {
 export function auditTableName(): string | undefined {
   return process.env.APIP_AUDIT_TABLE_NAME
 }
+
+export function accessRolesTableName(): string {
+  const t = process.env.APIP_ACCESS_ROLES_TABLE_NAME
+  if (!t) throw new Error('APIP_ACCESS_ROLES_TABLE_NAME is not set')
+  return t
+}
+
+export function userProfilesTableName(): string {
+  const t = process.env.APIP_USER_PROFILES_TABLE_NAME
+  if (!t) throw new Error('APIP_USER_PROFILES_TABLE_NAME is not set')
+  return t
+}

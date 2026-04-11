@@ -19,4 +19,7 @@ export const newId = {
   insight: () => shortId('ins'),
   tmsOrder: () => shortId('tord'),
   tmsTrip: () => shortId('trip'),
+  tmsCustomer: () => shortId('tcu'),
+  tmsLocality: () => shortId('tloc'),
+  accessRole: () => shortId('role'),
 }

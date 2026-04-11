@@ -127,17 +127,42 @@ export const putProjectInvestorAllocationsBody = z.object({
   ),
 })
 
+export const createTmsCustomerBody = z.object({
+  name: z.string().min(1),
+  taxId: z.string().optional(),
+  notes: z.string().optional(),
+})
+
+export const patchTmsCustomerBody = createTmsCustomerBody.partial()
+
+export const createTmsLocalityBody = z.object({
+  name: z.string().min(1),
+  region: z.string().optional(),
+  country: z.string().optional(),
+  notes: z.string().optional(),
+})
+
+export const patchTmsLocalityBody = createTmsLocalityBody.partial()
+
 export const createTransportOrderBody = z.object({
-  customerName: z.string().min(1),
-  origin: z.string().min(1),
-  destination: z.string().min(1),
+  customerId: z.string().min(1),
+  originLocalityId: z.string().min(1),
+  destinationLocalityId: z.string().min(1),
   cargoDescription: z.string().min(1),
   scheduledDate: z.string().datetime(),
   expectedRevenue: z.number().nonnegative(),
   status: z.enum(['CREATED', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED']).optional(),
 })
 
-export const patchTransportOrderBody = createTransportOrderBody.partial()
+export const patchTransportOrderBody = z.object({
+  customerId: z.string().min(1).optional(),
+  originLocalityId: z.string().min(1).optional(),
+  destinationLocalityId: z.string().min(1).optional(),
+  cargoDescription: z.string().min(1).optional(),
+  scheduledDate: z.string().datetime().optional(),
+  expectedRevenue: z.number().nonnegative().optional(),
+  status: z.enum(['CREATED', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED']).optional(),
+})
 
 export const createTransportTripBody = z.object({
   assetId: z.string().min(1),
@@ -169,6 +194,30 @@ export const tmsTripRevenueBody = z.object({
   assetId: z.string().min(1),
   date: z.string().datetime(),
   amount: z.number().positive(),
+})
+
+export const createAccessRoleBody = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  permissionKeys: z.array(z.string().min(1)).min(1),
+})
+
+export const patchAccessRoleBody = createAccessRoleBody.partial()
+
+export const putTenantUserProfileBody = z.object({
+  email: z.string().email().optional(),
+  displayName: z.string().min(1).optional(),
+  photoUrl: z.string().url().optional(),
+  preferences: z.record(z.string(), z.unknown()).optional(),
+  roleIds: z.array(z.string().min(1)).optional(),
+})
+
+/** Perfil propio (sin asignación de roles; la gestión de roleIds será vía admin). */
+export const putSelfUserProfileBody = z.object({
+  email: z.string().email().optional(),
+  displayName: z.string().min(1).optional(),
+  photoUrl: z.string().url().optional(),
+  preferences: z.record(z.string(), z.unknown()).optional(),
 })
 
 export const putAssetCashFlowsBody = z.object({

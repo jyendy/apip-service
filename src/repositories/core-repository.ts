@@ -17,6 +17,8 @@ import type {
   RevenueFact,
   Simulation,
   Tenant,
+  TmsCustomer,
+  TmsLocality,
   TransportOrder,
   TransportTrip,
 } from '../domain/types'
@@ -38,12 +40,28 @@ const ENTITY = {
   PROJ_ALLOC: 'PROJ_ALLOC',
   TMS_ORDER: 'TMS_ORDER',
   TMS_TRIP: 'TMS_TRIP',
+  TMS_CUSTOMER: 'TMS_CUSTOMER',
+  TMS_LOCALITY: 'TMS_LOCALITY',
 } as const
 
 type CoreItem = Record<string, unknown> & { PK: string; SK: string }
 
 function baseItem(tenantId: string, sk: string, rest: Record<string, unknown>): CoreItem {
   return { PK: keys.pkTenant(tenantId), SK: sk, tenantId, ...rest }
+}
+
+export function normalizeTransportOrder(raw: Record<string, unknown>): TransportOrder {
+  const originLabel = String(raw.originLabel ?? raw.origin ?? '')
+  const destinationLabel = String(raw.destinationLabel ?? raw.destination ?? '')
+  return {
+    ...(raw as unknown as TransportOrder),
+    customerName: String(raw.customerName ?? ''),
+    originLabel,
+    destinationLabel,
+    customerId: raw.customerId as string | undefined,
+    originLocalityId: raw.originLocalityId as string | undefined,
+    destinationLocalityId: raw.destinationLocalityId as string | undefined,
+  }
 }
 
 export async function putTenant(t: Tenant): Promise<void> {
@@ -581,7 +599,7 @@ export async function listTransportOrders(tenantId: string): Promise<TransportOr
       },
     }),
   )
-  return (r.Items ?? []) as unknown as TransportOrder[]
+  return (r.Items ?? []).map(item => normalizeTransportOrder(item as Record<string, unknown>))
 }
 
 export async function getTransportOrder(tenantId: string, orderId: string): Promise<TransportOrder | null> {
@@ -593,20 +611,18 @@ export async function getTransportOrder(tenantId: string, orderId: string): Prom
     }),
   )
   if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.TMS_ORDER) return null
-  return r.Item as unknown as TransportOrder
+  return normalizeTransportOrder(r.Item as Record<string, unknown>)
 }
 
 export async function putTransportOrder(o: TransportOrder): Promise<void> {
   const ddb = getDocumentClient()
-  await ddb.send(
-    new PutCommand({
-      TableName: tableName(),
-      Item: baseItem(o.tenantId, keys.skTmsOrder(o.id), {
-        entityType: ENTITY.TMS_ORDER,
-        ...o,
-      }),
-    }),
-  )
+  const item = baseItem(o.tenantId, keys.skTmsOrder(o.id), {
+    entityType: ENTITY.TMS_ORDER,
+    ...o,
+  }) as Record<string, unknown>
+  delete item.origin
+  delete item.destination
+  await ddb.send(new PutCommand({ TableName: tableName(), Item: item }))
 }
 
 export async function listTransportTrips(tenantId: string): Promise<TransportTrip[]> {
@@ -645,6 +661,118 @@ export async function putTransportTrip(t: TransportTrip): Promise<void> {
         entityType: ENTITY.TMS_TRIP,
         ...t,
       }),
+    }),
+  )
+}
+
+export async function listTmsCustomers(tenantId: string): Promise<TmsCustomer[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': 'TMS#CUSTOMER#',
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as TmsCustomer[]
+}
+
+export async function getTmsCustomer(tenantId: string, customerId: string): Promise<TmsCustomer | null> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new GetCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skTmsCustomer(customerId) },
+    }),
+  )
+  if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.TMS_CUSTOMER) return null
+  return r.Item as unknown as TmsCustomer
+}
+
+export async function putTmsCustomer(c: TmsCustomer): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(c.tenantId, keys.skTmsCustomer(c.id), {
+        entityType: ENTITY.TMS_CUSTOMER,
+        ...c,
+      }),
+    }),
+  )
+}
+
+export async function deleteTmsCustomer(tenantId: string, customerId: string): Promise<void> {
+  const orders = await listTransportOrders(tenantId)
+  if (orders.some(o => o.customerId === customerId)) {
+    throw new Error('TMS_CUSTOMER_IN_USE')
+  }
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new DeleteCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skTmsCustomer(customerId) },
+    }),
+  )
+}
+
+export async function listTmsLocalities(tenantId: string): Promise<TmsLocality[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': 'TMS#LOCALITY#',
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as TmsLocality[]
+}
+
+export async function getTmsLocality(tenantId: string, localityId: string): Promise<TmsLocality | null> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new GetCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skTmsLocality(localityId) },
+    }),
+  )
+  if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.TMS_LOCALITY) return null
+  return r.Item as unknown as TmsLocality
+}
+
+export async function putTmsLocality(l: TmsLocality): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(l.tenantId, keys.skTmsLocality(l.id), {
+        entityType: ENTITY.TMS_LOCALITY,
+        ...l,
+      }),
+    }),
+  )
+}
+
+export async function deleteTmsLocality(tenantId: string, localityId: string): Promise<void> {
+  const orders = await listTransportOrders(tenantId)
+  if (
+    orders.some(
+      o => o.originLocalityId === localityId || o.destinationLocalityId === localityId,
+    )
+  ) {
+    throw new Error('TMS_LOCALITY_IN_USE')
+  }
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new DeleteCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skTmsLocality(localityId) },
     }),
   )
 }

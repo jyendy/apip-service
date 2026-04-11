@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   APIP HTTP API, Lambda, JWT (Cognito), execution role. ImportValue from data,
-  messaging, cognito-stack (pool + app client).
+  cognito-stack (pool + app client). La Lambda API debe poder PutEvents al bus
+  default (EVENT_BUS_NAME=default): añadir events:PutEvents en el rol de ejecución (IAM).
 
 Parameters:
   LambdaCodeBucket:
@@ -42,8 +43,11 @@ Resources:
             Fn::ImportValue: apip-core-table-name
           APIP_AUDIT_TABLE_NAME:
             Fn::ImportValue: apip-audit-table-name
-          EVENT_BUS_NAME:
-            Fn::ImportValue: apip-event-bus-name
+          APIP_ACCESS_ROLES_TABLE_NAME:
+            Fn::ImportValue: apip-access-roles-table-name
+          APIP_USER_PROFILES_TABLE_NAME:
+            Fn::ImportValue: apip-user-profiles-table-name
+          EVENT_BUS_NAME: default
           ALLOW_DEV_TENANT_HEADER: 'false'
           PLATFORM_ADMIN_GROUP: apip-platform-admin
       Code:
@@ -181,6 +185,78 @@ Resources:
     Properties:
       ApiId: !Ref ApipHttpApi
       RouteKey: GET /v1/assets/{assetId}/structure
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1AssetsFacts:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/assets/{assetId}/facts
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1AccessRoles:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/access/roles
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePostV1AccessRoles:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: POST /v1/access/roles
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1AccessRolesId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/access/roles/{roleId}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePatchV1AccessRolesId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: PATCH /v1/access/roles/{roleId}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteDeleteV1AccessRolesId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: DELETE /v1/access/roles/{roleId}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1AccessUsers:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/access/users
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1AccessMe:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/access/me
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePutV1AccessMe:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: PUT /v1/access/me
       AuthorizationType: JWT
       AuthorizerId: !Ref ApipJwtAuthorizer
       Target: !Sub 'integrations/${ApipLambdaIntegration}'

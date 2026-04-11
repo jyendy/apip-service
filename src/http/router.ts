@@ -1,23 +1,31 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda'
 import { resolvePlatformAdmin, resolveRequestContext } from '../auth/context'
+import * as accessRepo from '../repositories/access-repository'
 import * as repo from '../repositories/core-repository'
 import {
+  createAccessRoleBody,
   createAssetBody,
   createInvestorBody,
   createPortfolioBody,
   createProjectBody,
   createTenantBody,
+  createTmsCustomerBody,
+  createTmsLocalityBody,
   createTransportOrderBody,
   createTransportTripBody,
   importAssetsBody,
   investorLedgerEntryBody,
   listQuery,
+  patchAccessRoleBody,
+  putSelfUserProfileBody,
   patchAssetBody,
   patchInvestorBody,
   patchPortfolioBody,
   patchProjectBody,
   patchTenantBody,
   patchSimulationBody,
+  patchTmsCustomerBody,
+  patchTmsLocalityBody,
   patchTransportOrderBody,
   patchTransportTripBody,
   putAssetCashFlowsBody,
@@ -27,7 +35,9 @@ import {
   tmsTripRevenueBody,
 } from '../domain/schemas'
 import { COST_CATEGORY_CATALOG } from '../domain/cost-categories'
-import { json, jsonError, noContent } from '../lib/http'
+import { PERMISSION_KEYS } from '../domain/permission-keys'
+import { auditedJsonError, finalizeAudit, finalizePlatformAudit } from '../lib/audit'
+import { json, noContent } from '../lib/http'
 import { newId } from '../lib/ids'
 import { publishDomainEvent } from '../lib/events'
 import {
@@ -48,8 +58,14 @@ import {
 } from '../services/participation'
 import { buildInvestorExposure } from '../services/investors'
 import { buildAssetRegisterReport, buildInvestmentSummaryReport, buildPortfolioSnapshotReport } from '../services/reports'
-import { buildTmsSummary, isKnownCostCategory, requireTransportAsset } from '../services/tms'
+import {
+  buildTmsSummary,
+  isKnownCostCategory,
+  requireTransportAsset,
+  resolveTransportOrderDenorm,
+} from '../services/tms'
 import type {
+  AccessRole,
   Asset,
   CostFact,
   ImportJob,
@@ -60,6 +76,9 @@ import type {
   RevenueFact,
   Simulation,
   Tenant,
+  TenantUserProfile,
+  TmsCustomer,
+  TmsLocality,
   TransportOrder,
   TransportTrip,
 } from '../domain/types'
@@ -104,9 +123,21 @@ function computeSimulationProjection(input: {
   return { roi, irr, npv, breakEvenMonth }
 }
 
-async function ensureTenant(tenantId: string): Promise<APIGatewayProxyResultV2 | null> {
+function validatePermissionKeys(keys: string[]): string | null {
+  const allowed = new Set<string>([...PERMISSION_KEYS])
+  for (const k of keys) {
+    if (!allowed.has(k)) return `Permiso no reconocido: ${k}`
+  }
+  return null
+}
+
+async function ensureTenant(
+  ctx: { tenantId: string; subject?: string },
+  event: APIGatewayProxyEventV2,
+  tenantId: string,
+): Promise<APIGatewayProxyResultV2 | null> {
   const t = await repo.getTenant(tenantId)
-  if (!t) return jsonError(404, 'TENANT_NOT_FOUND', 'Tenant no existe o no está inicializado')
+  if (!t) return auditedJsonError(ctx, event, 404, 'TENANT_NOT_FOUND', 'Tenant no existe o no está inicializado')
   return null
 }
 
@@ -114,15 +145,17 @@ async function routeAdmin(
   event: APIGatewayProxyEventV2,
   method: string,
   seg: string[],
+  adminCtx: { tenantId: string; subject: string },
 ): Promise<APIGatewayProxyResultV2> {
   if (seg[2] === 'tenants' && seg.length === 3) {
     if (method === 'GET') {
       const items = await repo.listTenants()
-      return json(200, { items })
+      return finalizePlatformAudit(event, adminCtx.subject, json(200, { items }))
     }
     if (method === 'POST') {
       const body = createTenantBody.safeParse(parseBody(event.body))
-      if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+      if (!body.success)
+        return auditedJsonError(adminCtx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
       const now = new Date().toISOString()
       const id = body.data.id ?? newId.tenant()
       const t: Tenant = {
@@ -132,30 +165,31 @@ async function routeAdmin(
         createdAt: now,
       }
       await repo.putTenant(t)
-      return json(201, t)
+      return finalizePlatformAudit(event, adminCtx.subject, json(201, t))
     }
   }
   if (seg[2] === 'tenants' && seg[3] && seg.length === 4) {
     const tenantId = seg[3]
     if (method === 'GET') {
       const t = await repo.getTenant(tenantId)
-      if (!t) return jsonError(404, 'NOT_FOUND', 'Tenant no encontrado')
-      return json(200, t)
+      if (!t) return auditedJsonError(adminCtx, event, 404, 'NOT_FOUND', 'Tenant no encontrado')
+      return finalizePlatformAudit(event, adminCtx.subject, json(200, t))
     }
     if (method === 'PATCH') {
       const existing = await repo.getTenant(tenantId)
-      if (!existing) return jsonError(404, 'NOT_FOUND', 'Tenant no encontrado')
+      if (!existing) return auditedJsonError(adminCtx, event, 404, 'NOT_FOUND', 'Tenant no encontrado')
       const body = patchTenantBody.safeParse(parseBody(event.body))
-      if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+      if (!body.success)
+        return auditedJsonError(adminCtx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
       const t: Tenant = {
         ...existing,
         ...body.data,
       }
       await repo.putTenant(t)
-      return json(200, t)
+      return finalizePlatformAudit(event, adminCtx.subject, json(200, t))
     }
   }
-  return jsonError(404, 'NOT_FOUND', `Ruta admin no implementada: ${method}`)
+  return auditedJsonError(adminCtx, event, 404, 'NOT_FOUND', `Ruta admin no implementada: ${method}`)
 }
 
 export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
@@ -174,14 +208,15 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
   if (seg[0] === 'v1' && seg[1] === 'admin') {
     const admin = resolvePlatformAdmin(event)
     if (!admin) {
-      return jsonError(403, 'FORBIDDEN', 'Se requiere rol de administrador de plataforma (grupo Cognito o custom:platformAdmin)')
+      return auditedJsonError(undefined, event, 403, 'FORBIDDEN', 'Se requiere rol de administrador de plataforma (grupo Cognito o custom:platformAdmin)')
     }
+    const adminCtx = { tenantId: '_platform_', subject: admin.subject }
     try {
-      return await routeAdmin(event, method, seg)
+      return await routeAdmin(event, method, seg, adminCtx)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       console.error(e)
-      return jsonError(500, 'INTERNAL', msg)
+      return auditedJsonError(adminCtx, event, 500, 'INTERNAL', msg)
     }
   }
 
@@ -189,10 +224,10 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
   try {
     ctx = resolveRequestContext(event)
   } catch {
-    return jsonError(401, 'UNAUTHORIZED', 'No se pudo resolver tenantId (JWT o cabecera X-Tenant-Id en dev)')
+    return auditedJsonError(undefined, event, 401, 'UNAUTHORIZED', 'No se pudo resolver tenantId (JWT o cabecera X-Tenant-Id en dev)')
   }
 
-  const err = await ensureTenant(ctx.tenantId)
+  const err = await ensureTenant(ctx, event, ctx.tenantId)
   if (err) return err
 
   try {
@@ -200,23 +235,23 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'assets' && seg.length === 2) {
       if (method === 'GET') {
         const q = listQuery.safeParse(event.queryStringParameters ?? {})
-        if (!q.success) return jsonError(400, 'VALIDATION', 'Query inválida', q.error.flatten())
+        if (!q.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Query inválida', q.error.flatten())
         const assets = await repo.listAssetsByTenant(ctx.tenantId, {
           projectId: q.data.projectId,
           portfolioId: q.data.portfolioId,
           type: q.data.type,
         })
-        return json(200, { items: assets, nextCursor: null })
+        return finalizeAudit(ctx, event, json(200, { items: assets, nextCursor: null }))
       }
       if (method === 'POST') {
         const body = createAssetBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const b = body.data
         const pf = await repo.getPortfolio(ctx.tenantId, b.portfolioId)
-        if (!pf) return jsonError(400, 'VALIDATION', 'portfolioId no existe')
+        if (!pf) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'portfolioId no existe')
         const pj = await repo.getProject(ctx.tenantId, b.projectId)
         if (!pj || pj.portfolioId !== b.portfolioId) {
-          return jsonError(400, 'VALIDATION', 'projectId no existe o no pertenece al portfolio')
+          return auditedJsonError(ctx, event, 400, 'VALIDATION', 'projectId no existe o no pertenece al portfolio')
         }
         const now = new Date().toISOString()
         const asset: Asset = {
@@ -241,7 +276,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           type: 'AssetCreated',
           payload: { assetId: asset.id },
         })
-        return json(201, asset)
+        return finalizeAudit(ctx, event, json(201, asset))
       }
     }
 
@@ -249,14 +284,14 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const assetId = seg[2]
       if (method === 'GET') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
-        if (!a) return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
-        return json(200, a)
+        if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        return finalizeAudit(ctx, event, json(200, a))
       }
       if (method === 'PATCH') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
-        if (!a) return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
+        if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
         const body = patchAssetBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const touchesStructuralFields =
           body.data.type !== undefined ||
           body.data.acquisitionDate !== undefined ||
@@ -266,7 +301,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
           const cost = await repo.listCostFacts(ctx.tenantId, assetId)
           if (rev.length > 0 || cost.length > 0) {
-            return jsonError(
+            return auditedJsonError(ctx, event,
               409,
               'MODEL_LOCKED',
               'No se pueden cambiar type/acquisitionDate/initialInvestment/currency cuando ya existen hechos operativos para el activo',
@@ -280,11 +315,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           updatedAt: now,
         }
         await repo.putAsset(updated)
-        return json(200, updated)
+        return finalizeAudit(ctx, event, json(200, updated))
       }
       if (method === 'DELETE') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
-        if (!a) return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
+        if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
         await repo.deleteFactsForAsset(ctx.tenantId, assetId)
         await repo.deleteAssetItem(ctx.tenantId, assetId)
         await publishDomainEvent(BUS, 'apip.service', {
@@ -292,7 +327,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           type: 'AssetDeleted',
           payload: { assetId },
         })
-        return noContent()
+        return finalizeAudit(ctx, event, noContent())
       }
     }
 
@@ -300,11 +335,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const assetId = seg[2]
       if (method === 'GET') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
-        if (!a) return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
+        if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
         const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
         const cost = await repo.listCostFacts(ctx.tenantId, assetId)
         const metrics = computeAssetMetrics(a, rev, cost)
-        return json(200, metrics)
+        return finalizeAudit(ctx, event, json(200, metrics))
       }
     }
 
@@ -312,11 +347,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const assetId = seg[2]
       if (method === 'GET') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
-        if (!a) return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
+        if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
         const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
         const cost = await repo.listCostFacts(ctx.tenantId, assetId)
         const metrics = computeAssetMetrics(a, rev, cost)
-        return json(200, { assetId, cashFlow: metrics.cashFlow })
+        return finalizeAudit(ctx, event, json(200, { assetId, cashFlow: metrics.cashFlow }))
       }
     }
 
@@ -324,10 +359,10 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const assetId = seg[2]
       if (method === 'GET') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
-        if (!a) return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
+        if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
         const revenueFacts = await repo.listRevenueFacts(ctx.tenantId, assetId)
         const costFacts = await repo.listCostFacts(ctx.tenantId, assetId)
-        return json(200, { assetId, revenueFacts, costFacts })
+        return finalizeAudit(ctx, event, json(200, { assetId, revenueFacts, costFacts }))
       }
     }
 
@@ -335,9 +370,9 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const assetId = seg[2]
       if (method === 'PUT') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
-        if (!a) return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
+        if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
         const body = putAssetCashFlowsBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const src = (s: string | undefined): RevenueFact['source'] => {
           if (s === 'import' || s === 'api') return s
@@ -374,7 +409,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
         const cost = await repo.listCostFacts(ctx.tenantId, assetId)
         const metrics = computeAssetMetrics(a, rev, cost)
-        return json(200, { assetId, updatedPeriods: body.data.periods.length, metrics })
+        return finalizeAudit(ctx, event, json(200, { assetId, updatedPeriods: body.data.periods.length, metrics }))
       }
     }
 
@@ -382,12 +417,110 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const assetId = seg[2]
       if (method === 'GET') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
-        if (!a) return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
+        if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
         const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
         const cost = await repo.listCostFacts(ctx.tenantId, assetId)
         const metrics = computeAssetMetrics(a, rev, cost)
         const { lines, operatingIncome } = buildStandardizedStructure(metrics, rev, cost)
-        return json(200, { assetId, lines, operatingIncome, ebitda: metrics.ebitda, netProfit: metrics.netProfit })
+        return finalizeAudit(ctx, event, json(200, { assetId, lines, operatingIncome, ebitda: metrics.ebitda, netProfit: metrics.netProfit }))
+      }
+    }
+
+    // --- access (roles + perfiles; usuario enlazado por cognito sub del JWT) ---
+    if (seg[0] === 'v1' && seg[1] === 'access' && seg[2] === 'roles' && seg.length === 3) {
+      if (method === 'GET') {
+        const items = await accessRepo.listAccessRoles(ctx.tenantId)
+        return finalizeAudit(ctx, event, json(200, { items }))
+      }
+      if (method === 'POST') {
+        const body = createAccessRoleBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const permErr = validatePermissionKeys(body.data.permissionKeys)
+        if (permErr) return auditedJsonError(ctx, event, 400, 'VALIDATION', permErr)
+        const now = new Date().toISOString()
+        const role: AccessRole = {
+          id: newId.accessRole(),
+          tenantId: ctx.tenantId,
+          name: body.data.name,
+          description: body.data.description,
+          permissionKeys: body.data.permissionKeys,
+          createdAt: now,
+          updatedAt: now,
+        }
+        await accessRepo.putAccessRole(role)
+        return finalizeAudit(ctx, event, json(201, role))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'access' && seg[2] === 'roles' && seg[3] && seg.length === 4) {
+      const roleId = seg[3]
+      if (method === 'GET') {
+        const role = await accessRepo.getAccessRole(ctx.tenantId, roleId)
+        if (!role) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Rol no encontrado')
+        return finalizeAudit(ctx, event, json(200, role))
+      }
+      if (method === 'PATCH') {
+        const existing = await accessRepo.getAccessRole(ctx.tenantId, roleId)
+        if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Rol no encontrado')
+        const body = patchAccessRoleBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (body.data.permissionKeys) {
+          const permErr = validatePermissionKeys(body.data.permissionKeys)
+          if (permErr) return auditedJsonError(ctx, event, 400, 'VALIDATION', permErr)
+        }
+        const now = new Date().toISOString()
+        const updated: AccessRole = {
+          ...existing,
+          ...body.data,
+          updatedAt: now,
+        }
+        await accessRepo.putAccessRole(updated)
+        return finalizeAudit(ctx, event, json(200, updated))
+      }
+      if (method === 'DELETE') {
+        const existing = await accessRepo.getAccessRole(ctx.tenantId, roleId)
+        if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Rol no encontrado')
+        await accessRepo.deleteAccessRole(ctx.tenantId, roleId)
+        return finalizeAudit(ctx, event, noContent())
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'access' && seg[2] === 'users' && seg.length === 3) {
+      if (method === 'GET') {
+        const items = await accessRepo.listTenantUserProfiles(ctx.tenantId)
+        return finalizeAudit(ctx, event, json(200, { items }))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'access' && seg[2] === 'me' && seg.length === 3) {
+      const sub = ctx.subject
+      if (!sub) return auditedJsonError(ctx, event, 401, 'UNAUTHORIZED', 'Token sin subject (sub)')
+      if (method === 'GET') {
+        const p = await accessRepo.getTenantUserProfile(ctx.tenantId, sub)
+        if (!p) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Perfil no registrado; use PUT para crearlo')
+        return finalizeAudit(ctx, event, json(200, p))
+      }
+      if (method === 'PUT') {
+        const body = putSelfUserProfileBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const existing = await accessRepo.getTenantUserProfile(ctx.tenantId, sub)
+        const profile: TenantUserProfile = existing
+          ? {
+              ...existing,
+              ...body.data,
+              updatedAt: now,
+            }
+          : {
+              tenantId: ctx.tenantId,
+              cognitoSub: sub,
+              roleIds: [],
+              ...body.data,
+              createdAt: now,
+              updatedAt: now,
+            }
+        await accessRepo.putTenantUserProfile(profile)
+        return finalizeAudit(ctx, event, json(200, profile))
       }
     }
 
@@ -395,11 +528,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'portfolios' && seg.length === 2) {
       if (method === 'GET') {
         const items = await repo.listPortfolios(ctx.tenantId)
-        return json(200, { items })
+        return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
         const body = createPortfolioBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const p: Portfolio = {
           id: newId.portfolio(),
@@ -411,7 +544,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           updatedAt: now,
         }
         await repo.putPortfolio(p)
-        return json(201, p)
+        return finalizeAudit(ctx, event, json(201, p))
       }
     }
 
@@ -419,14 +552,14 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const id = seg[2]
       if (method === 'GET') {
         const p = await repo.getPortfolio(ctx.tenantId, id)
-        if (!p) return jsonError(404, 'NOT_FOUND', 'Portfolio no encontrado')
-        return json(200, p)
+        if (!p) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Portfolio no encontrado')
+        return finalizeAudit(ctx, event, json(200, p))
       }
       if (method === 'PATCH') {
         const p = await repo.getPortfolio(ctx.tenantId, id)
-        if (!p) return jsonError(404, 'NOT_FOUND', 'Portfolio no encontrado')
+        if (!p) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Portfolio no encontrado')
         const body = patchPortfolioBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const updated: Portfolio = {
           ...p,
@@ -435,7 +568,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           updatedAt: now,
         }
         await repo.putPortfolio(updated)
-        return json(200, updated)
+        return finalizeAudit(ctx, event, json(200, updated))
       }
     }
 
@@ -449,7 +582,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
           metricsList.push(computeAssetMetrics(asset, rev, cost))
         }
-        return json(200, { portfolioId, assets: metricsList })
+        return finalizeAudit(ctx, event, json(200, { portfolioId, assets: metricsList }))
       }
     }
 
@@ -464,7 +597,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           const m = computeAssetMetrics(asset, rev, cost)
           series.push({ assetId: asset.id, cashFlow: m.cashFlow })
         }
-        return json(200, { portfolioId, series })
+        return finalizeAudit(ctx, event, json(200, { portfolioId, series }))
       }
     }
 
@@ -481,7 +614,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           const w = totalCap > 0 ? asset.initialInvestment / totalCap : 0
           weightedRoi += m.roi * w
         }
-        return json(200, { portfolioId, totalCapitalDeployed: totalCap, weightedROI: weightedRoi })
+        return finalizeAudit(ctx, event, json(200, { portfolioId, totalCapitalDeployed: totalCap, weightedROI: weightedRoi }))
       }
     }
 
@@ -489,8 +622,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const portfolioId = seg[2]
       if (method === 'GET') {
         const view = await buildPortfolioCapitalParticipation(ctx.tenantId, portfolioId)
-        if (!view) return jsonError(404, 'NOT_FOUND', 'Portfolio no encontrado')
-        return json(200, view)
+        if (!view) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Portfolio no encontrado')
+        return finalizeAudit(ctx, event, json(200, view))
       }
     }
 
@@ -499,13 +632,13 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'GET') {
         const q = event.queryStringParameters?.portfolioId
         const items = await repo.listProjects(ctx.tenantId, q)
-        return json(200, { items })
+        return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
         const body = createProjectBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const pf = await repo.getPortfolio(ctx.tenantId, body.data.portfolioId)
-        if (!pf) return jsonError(400, 'VALIDATION', 'portfolioId no existe')
+        if (!pf) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'portfolioId no existe')
         const now = new Date().toISOString()
         const p: Project = {
           id: newId.project(),
@@ -521,7 +654,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           updatedAt: now,
         }
         await repo.putProject(p)
-        return json(201, p)
+        return finalizeAudit(ctx, event, json(201, p))
       }
     }
 
@@ -529,14 +662,14 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const id = seg[2]
       if (method === 'GET') {
         const p = await repo.getProject(ctx.tenantId, id)
-        if (!p) return jsonError(404, 'NOT_FOUND', 'Proyecto no encontrado')
-        return json(200, p)
+        if (!p) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proyecto no encontrado')
+        return finalizeAudit(ctx, event, json(200, p))
       }
       if (method === 'PATCH') {
         const p = await repo.getProject(ctx.tenantId, id)
-        if (!p) return jsonError(404, 'NOT_FOUND', 'Proyecto no encontrado')
+        if (!p) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proyecto no encontrado')
         const body = patchProjectBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const updated: Project = {
           ...p,
@@ -544,7 +677,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           updatedAt: now,
         }
         await repo.putProject(updated)
-        return json(200, updated)
+        return finalizeAudit(ctx, event, json(200, updated))
       }
     }
 
@@ -558,7 +691,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
           metricsList.push(computeAssetMetrics(asset, rev, cost))
         }
-        return json(200, { projectId, assets: metricsList })
+        return finalizeAudit(ctx, event, json(200, { projectId, assets: metricsList }))
       }
     }
 
@@ -573,7 +706,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           const m = computeAssetMetrics(asset, rev, cost)
           series.push({ assetId: asset.id, cashFlow: m.cashFlow })
         }
-        return json(200, { projectId, series })
+        return finalizeAudit(ctx, event, json(200, { projectId, series }))
       }
     }
 
@@ -581,7 +714,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const projectId = seg[2]
       if (method === 'PUT') {
         const body = putProjectInvestorAllocationsBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         try {
           await validateAndReplaceProjectAllocations(ctx.tenantId, projectId, body.data.allocations)
         } catch (e) {
@@ -592,12 +725,12 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
             msg.includes('DUPLICATE_') ||
             msg.includes('PROJECT_NOT_FOUND')
           ) {
-            return jsonError(400, 'VALIDATION', msg)
+            return auditedJsonError(ctx, event, 400, 'VALIDATION', msg)
           }
           throw e
         }
         const view = await buildProjectCapitalParticipation(ctx.tenantId, projectId)
-        return json(200, view)
+        return finalizeAudit(ctx, event, json(200, view))
       }
     }
 
@@ -605,8 +738,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const projectId = seg[2]
       if (method === 'GET') {
         const view = await buildProjectCapitalParticipation(ctx.tenantId, projectId)
-        if (!view) return jsonError(404, 'NOT_FOUND', 'Proyecto no encontrado')
-        return json(200, view)
+        if (!view) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proyecto no encontrado')
+        return finalizeAudit(ctx, event, json(200, view))
       }
     }
 
@@ -653,7 +786,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         }
         const irrAvg = assets.length ? irrSum / assets.length : 0
 
-        return json(200, {
+        return finalizeAudit(ctx, event, json(200, {
           kpis: {
             totalCapitalDeployed: totalCap,
             portfolioROI,
@@ -665,7 +798,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
             diversificationIndex: new Set(assets.map(a => a.type)).size * 25,
           },
           assetSummary: rows,
-        })
+        }))
       }
     }
 
@@ -679,7 +812,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           const m = computeAssetMetrics(asset, rev, cost)
           enriched.push({ id: asset.id, name: asset.name, metrics: m })
         }
-        return json(200, { items: buildInsights(ctx.tenantId, enriched) })
+        return finalizeAudit(ctx, event, json(200, { items: buildInsights(ctx.tenantId, enriched) }))
       }
     }
 
@@ -689,15 +822,15 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'GET') {
         if (kind === 'investment-summary') {
           const rep = await buildInvestmentSummaryReport(ctx.tenantId)
-          return json(200, rep)
+          return finalizeAudit(ctx, event, json(200, rep))
         }
         if (kind === 'asset-register') {
           const rep = await buildAssetRegisterReport(ctx.tenantId)
-          return json(200, rep)
+          return finalizeAudit(ctx, event, json(200, rep))
         }
         if (kind === 'portfolio-snapshot') {
           const rep = await buildPortfolioSnapshotReport(ctx.tenantId)
-          return json(200, rep)
+          return finalizeAudit(ctx, event, json(200, rep))
         }
       }
     }
@@ -706,11 +839,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'investors' && seg.length === 2) {
       if (method === 'GET') {
         const items = await repo.listInvestors(ctx.tenantId)
-        return json(200, { items })
+        return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
         const body = createInvestorBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const inv: Investor = {
           id: newId.investor(),
@@ -725,7 +858,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           updatedAt: now,
         }
         await repo.putInvestor(inv)
-        return json(201, inv)
+        return finalizeAudit(ctx, event, json(201, inv))
       }
     }
 
@@ -733,24 +866,24 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const investorId = seg[2]
       if (method === 'GET') {
         const inv = await repo.getInvestor(ctx.tenantId, investorId)
-        if (!inv) return jsonError(404, 'NOT_FOUND', 'Inversionista no encontrado')
-        return json(200, inv)
+        if (!inv) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Inversionista no encontrado')
+        return finalizeAudit(ctx, event, json(200, inv))
       }
       if (method === 'PATCH') {
         const existing = await repo.getInvestor(ctx.tenantId, investorId)
-        if (!existing) return jsonError(404, 'NOT_FOUND', 'Inversionista no encontrado')
+        if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Inversionista no encontrado')
         const body = patchInvestorBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const updated: Investor = { ...existing, ...body.data, updatedAt: now }
         await repo.putInvestor(updated)
-        return json(200, updated)
+        return finalizeAudit(ctx, event, json(200, updated))
       }
       if (method === 'DELETE') {
         const existing = await repo.getInvestor(ctx.tenantId, investorId)
-        if (!existing) return jsonError(404, 'NOT_FOUND', 'Inversionista no encontrado')
+        if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Inversionista no encontrado')
         await repo.deleteInvestor(ctx.tenantId, investorId)
-        return noContent()
+        return finalizeAudit(ctx, event, noContent())
       }
     }
 
@@ -759,13 +892,13 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'GET') {
         const entries = await repo.listInvestorLedgerEntries(ctx.tenantId, investorId)
         const items = [...entries].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
-        return json(200, { items })
+        return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
         const inv = await repo.getInvestor(ctx.tenantId, investorId)
-        if (!inv) return jsonError(404, 'NOT_FOUND', 'Inversionista no encontrado')
+        if (!inv) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Inversionista no encontrado')
         const body = investorLedgerEntryBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const entry: InvestorLedgerEntry = {
           id: newId.ledgerEntry(),
@@ -778,7 +911,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           createdAt: now,
         }
         await repo.putInvestorLedgerEntry(entry)
-        return json(201, entry)
+        return finalizeAudit(ctx, event, json(201, entry))
       }
     }
 
@@ -786,9 +919,9 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const investorId = seg[2]
       if (method === 'GET') {
         const inv = await repo.getInvestor(ctx.tenantId, investorId)
-        if (!inv) return jsonError(404, 'NOT_FOUND', 'Inversionista no encontrado')
+        if (!inv) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Inversionista no encontrado')
         const acc = await buildInvestorCapitalAccount(ctx.tenantId, inv)
-        return json(200, acc)
+        return finalizeAudit(ctx, event, json(200, acc))
       }
     }
 
@@ -796,9 +929,9 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const investorId = seg[2]
       if (method === 'GET') {
         const inv = await repo.getInvestor(ctx.tenantId, investorId)
-        if (!inv) return jsonError(404, 'NOT_FOUND', 'Inversionista no encontrado')
+        if (!inv) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Inversionista no encontrado')
         const exp = await buildInvestorExposure(ctx.tenantId, inv)
-        return json(200, exp)
+        return finalizeAudit(ctx, event, json(200, exp))
       }
     }
 
@@ -806,7 +939,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'imports' && seg[2] === 'assets' && seg.length === 3) {
       if (method === 'POST') {
         const body = importAssetsBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const b = body.data
 
         if (b.rows && b.rows.length > 0) {
@@ -872,12 +1005,12 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
             errorRows,
             updatedAt: new Date().toISOString(),
           })
-          return json(200, {
+          return finalizeAudit(ctx, event, json(200, {
             jobId: job.id,
             status: finalStatus,
             created,
             errors,
-          })
+          }))
         }
 
         const now = new Date().toISOString()
@@ -891,7 +1024,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           updatedAt: now,
         }
         await repo.putImportJob(job)
-        return json(202, { jobId: job.id, status: job.status })
+        return finalizeAudit(ctx, event, json(202, { jobId: job.id, status: job.status }))
       }
     }
 
@@ -899,8 +1032,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const jobId = seg[3]
       if (method === 'GET') {
         const j = await repo.getImportJob(ctx.tenantId, jobId)
-        if (!j) return jsonError(404, 'NOT_FOUND', 'Job no encontrado')
-        return json(200, j)
+        if (!j) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Job no encontrado')
+        return finalizeAudit(ctx, event, json(200, j))
       }
     }
 
@@ -908,11 +1041,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'simulations' && seg.length === 2) {
       if (method === 'GET') {
         const items = await repo.listSimulations(ctx.tenantId)
-        return json(200, { items })
+        return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
         const body = simulationBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const b = body.data
         const now = new Date().toISOString()
         const id = newId.simulation()
@@ -937,7 +1070,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           updatedAt: now,
         }
         await repo.putSimulation(simulation)
-        return json(201, simulation)
+        return finalizeAudit(ctx, event, json(201, simulation))
       }
     }
 
@@ -945,14 +1078,14 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const simulationId = seg[2]
       if (method === 'GET') {
         const sim = await repo.getSimulation(ctx.tenantId, simulationId)
-        if (!sim) return jsonError(404, 'NOT_FOUND', 'Simulación no encontrada')
-        return json(200, sim)
+        if (!sim) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Simulación no encontrada')
+        return finalizeAudit(ctx, event, json(200, sim))
       }
       if (method === 'PATCH') {
         const sim = await repo.getSimulation(ctx.tenantId, simulationId)
-        if (!sim) return jsonError(404, 'NOT_FOUND', 'Simulación no encontrada')
+        if (!sim) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Simulación no encontrada')
         const body = patchSimulationBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const merged = { ...sim, ...body.data }
         const projection = computeSimulationProjection({
           initialCapital: merged.initialCapital,
@@ -972,45 +1105,174 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           updatedAt: new Date().toISOString(),
         }
         await repo.putSimulation(updated)
-        return json(200, updated)
+        return finalizeAudit(ctx, event, json(200, updated))
       }
       if (method === 'DELETE') {
         const sim = await repo.getSimulation(ctx.tenantId, simulationId)
-        if (!sim) return jsonError(404, 'NOT_FOUND', 'Simulación no encontrada')
+        if (!sim) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Simulación no encontrada')
         await repo.deleteSimulation(ctx.tenantId, simulationId)
-        return noContent()
+        return finalizeAudit(ctx, event, noContent())
       }
     }
 
     // --- TMS (operacional → RevenueFact / CostFact; sin métricas en TMS) ---
     if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'cost-categories' && seg.length === 3) {
       if (method === 'GET') {
-        return json(200, { items: COST_CATEGORY_CATALOG })
+        return finalizeAudit(ctx, event, json(200, { items: COST_CATEGORY_CATALOG }))
       }
     }
 
     if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'summary' && seg.length === 3) {
       if (method === 'GET') {
         const s = await buildTmsSummary(ctx.tenantId)
-        return json(200, s)
+        return finalizeAudit(ctx, event, json(200, s))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'customers' && seg.length === 3) {
+      if (method === 'GET') {
+        const items = await repo.listTmsCustomers(ctx.tenantId)
+        return finalizeAudit(ctx, event, json(200, { items }))
+      }
+      if (method === 'POST') {
+        const body = createTmsCustomerBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const c: TmsCustomer = {
+          id: newId.tmsCustomer(),
+          tenantId: ctx.tenantId,
+          name: body.data.name,
+          taxId: body.data.taxId,
+          notes: body.data.notes,
+          createdAt: now,
+          updatedAt: now,
+        }
+        await repo.putTmsCustomer(c)
+        return finalizeAudit(ctx, event, json(201, c))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'customers' && seg[3] && seg.length === 4) {
+      const customerId = seg[3]
+      if (method === 'GET') {
+        const c = await repo.getTmsCustomer(ctx.tenantId, customerId)
+        if (!c) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Cliente no encontrado')
+        return finalizeAudit(ctx, event, json(200, c))
+      }
+      if (method === 'PATCH') {
+        const existing = await repo.getTmsCustomer(ctx.tenantId, customerId)
+        if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Cliente no encontrado')
+        const body = patchTmsCustomerBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const updated: TmsCustomer = { ...existing, ...body.data, updatedAt: now }
+        await repo.putTmsCustomer(updated)
+        return finalizeAudit(ctx, event, json(200, updated))
+      }
+      if (method === 'DELETE') {
+        try {
+          await repo.deleteTmsCustomer(ctx.tenantId, customerId)
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          if (msg === 'TMS_CUSTOMER_IN_USE') {
+            return auditedJsonError(ctx, event, 409, 'CONFLICT', 'Cliente referenciado por órdenes')
+          }
+          throw e
+        }
+        return finalizeAudit(ctx, event, noContent())
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'localities' && seg.length === 3) {
+      if (method === 'GET') {
+        const items = await repo.listTmsLocalities(ctx.tenantId)
+        return finalizeAudit(ctx, event, json(200, { items }))
+      }
+      if (method === 'POST') {
+        const body = createTmsLocalityBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const loc: TmsLocality = {
+          id: newId.tmsLocality(),
+          tenantId: ctx.tenantId,
+          name: body.data.name,
+          region: body.data.region,
+          country: body.data.country,
+          notes: body.data.notes,
+          createdAt: now,
+          updatedAt: now,
+        }
+        await repo.putTmsLocality(loc)
+        return finalizeAudit(ctx, event, json(201, loc))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'localities' && seg[3] && seg.length === 4) {
+      const localityId = seg[3]
+      if (method === 'GET') {
+        const loc = await repo.getTmsLocality(ctx.tenantId, localityId)
+        if (!loc) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Localidad no encontrada')
+        return finalizeAudit(ctx, event, json(200, loc))
+      }
+      if (method === 'PATCH') {
+        const existing = await repo.getTmsLocality(ctx.tenantId, localityId)
+        if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Localidad no encontrada')
+        const body = patchTmsLocalityBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const updated: TmsLocality = { ...existing, ...body.data, updatedAt: now }
+        await repo.putTmsLocality(updated)
+        return finalizeAudit(ctx, event, json(200, updated))
+      }
+      if (method === 'DELETE') {
+        try {
+          await repo.deleteTmsLocality(ctx.tenantId, localityId)
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          if (msg === 'TMS_LOCALITY_IN_USE') {
+            return auditedJsonError(ctx, event, 409, 'CONFLICT', 'Localidad referenciada por órdenes')
+          }
+          throw e
+        }
+        return finalizeAudit(ctx, event, noContent())
       }
     }
 
     if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'orders' && seg.length === 3) {
       if (method === 'GET') {
         const items = await repo.listTransportOrders(ctx.tenantId)
-        return json(200, { items })
+        return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
         const body = createTransportOrderBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        let denorm: { customerName: string; originLabel: string; destinationLabel: string }
+        try {
+          denorm = await resolveTransportOrderDenorm(ctx.tenantId, {
+            customerId: body.data.customerId,
+            originLocalityId: body.data.originLocalityId,
+            destinationLocalityId: body.data.destinationLocalityId,
+          })
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          if (msg === 'TMS_CUSTOMER_NOT_FOUND') {
+            return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Cliente no encontrado')
+          }
+          if (msg === 'TMS_LOCALITY_NOT_FOUND') {
+            return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Localidad no encontrada')
+          }
+          throw e
+        }
         const now = new Date().toISOString()
         const o: TransportOrder = {
           id: newId.tmsOrder(),
           tenantId: ctx.tenantId,
-          customerName: body.data.customerName,
-          origin: body.data.origin,
-          destination: body.data.destination,
+          customerId: body.data.customerId,
+          originLocalityId: body.data.originLocalityId,
+          destinationLocalityId: body.data.destinationLocalityId,
+          customerName: denorm.customerName,
+          originLabel: denorm.originLabel,
+          destinationLabel: denorm.destinationLabel,
           cargoDescription: body.data.cargoDescription,
           scheduledDate: body.data.scheduledDate,
           expectedRevenue: body.data.expectedRevenue,
@@ -1019,7 +1281,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           updatedAt: now,
         }
         await repo.putTransportOrder(o)
-        return json(201, o)
+        return finalizeAudit(ctx, event, json(201, o))
       }
     }
 
@@ -1027,40 +1289,78 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const orderId = seg[3]
       if (method === 'GET') {
         const ord = await repo.getTransportOrder(ctx.tenantId, orderId)
-        if (!ord) return jsonError(404, 'NOT_FOUND', 'Orden no encontrada')
-        return json(200, ord)
+        if (!ord) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Orden no encontrada')
+        return finalizeAudit(ctx, event, json(200, ord))
       }
       if (method === 'PATCH') {
         const existing = await repo.getTransportOrder(ctx.tenantId, orderId)
-        if (!existing) return jsonError(404, 'NOT_FOUND', 'Orden no encontrada')
+        if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Orden no encontrada')
         const body = patchTransportOrderBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const updated: TransportOrder = { ...existing, ...body.data, updatedAt: now }
+        const touchedCat =
+          body.data.customerId !== undefined ||
+          body.data.originLocalityId !== undefined ||
+          body.data.destinationLocalityId !== undefined
+        if (touchedCat) {
+          if (
+            !updated.customerId ||
+            !updated.originLocalityId ||
+            !updated.destinationLocalityId
+          ) {
+            return auditedJsonError(
+              ctx,
+              event,
+              400,
+              'VALIDATION',
+              'Si actualizas catálogo, indica cliente, origen y destino',
+            )
+          }
+          try {
+            const denorm = await resolveTransportOrderDenorm(ctx.tenantId, {
+              customerId: updated.customerId,
+              originLocalityId: updated.originLocalityId,
+              destinationLocalityId: updated.destinationLocalityId,
+            })
+            updated.customerName = denorm.customerName
+            updated.originLabel = denorm.originLabel
+            updated.destinationLabel = denorm.destinationLabel
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e)
+            if (msg === 'TMS_CUSTOMER_NOT_FOUND') {
+              return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Cliente no encontrado')
+            }
+            if (msg === 'TMS_LOCALITY_NOT_FOUND') {
+              return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Localidad no encontrada')
+            }
+            throw e
+          }
+        }
         await repo.putTransportOrder(updated)
-        return json(200, updated)
+        return finalizeAudit(ctx, event, json(200, updated))
       }
     }
 
     if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'trips' && seg.length === 3) {
       if (method === 'GET') {
         const items = await repo.listTransportTrips(ctx.tenantId)
-        return json(200, { items })
+        return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
         const body = createTransportTripBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         try {
           await requireTransportAsset(ctx.tenantId, body.data.assetId)
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
-          if (msg === 'ASSET_NOT_FOUND') return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
-          if (msg === 'ASSET_NOT_TRANSPORT') return jsonError(400, 'VALIDATION', 'El activo debe ser type transport')
+          if (msg === 'ASSET_NOT_FOUND') return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+          if (msg === 'ASSET_NOT_TRANSPORT') return auditedJsonError(ctx, event, 400, 'VALIDATION', 'El activo debe ser type transport')
           throw e
         }
         for (const oid of body.data.orderIds) {
           const ord = await repo.getTransportOrder(ctx.tenantId, oid)
-          if (!ord) return jsonError(400, 'VALIDATION', `Orden no encontrada: ${oid}`)
+          if (!ord) return auditedJsonError(ctx, event, 400, 'VALIDATION', `Orden no encontrada: ${oid}`)
         }
         const now = new Date().toISOString()
         const t: TransportTrip = {
@@ -1077,7 +1377,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           updatedAt: now,
         }
         await repo.putTransportTrip(t)
-        return json(201, t)
+        return finalizeAudit(ctx, event, json(201, t))
       }
     }
 
@@ -1085,18 +1385,18 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const tripId = seg[3]
       if (method === 'GET') {
         const trip = await repo.getTransportTrip(ctx.tenantId, tripId)
-        if (!trip) return jsonError(404, 'NOT_FOUND', 'Viaje no encontrado')
-        return json(200, trip)
+        if (!trip) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Viaje no encontrado')
+        return finalizeAudit(ctx, event, json(200, trip))
       }
       if (method === 'PATCH') {
         const existing = await repo.getTransportTrip(ctx.tenantId, tripId)
-        if (!existing) return jsonError(404, 'NOT_FOUND', 'Viaje no encontrado')
+        if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Viaje no encontrado')
         const body = patchTransportTripBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const updated: TransportTrip = { ...existing, ...body.data, updatedAt: now }
         await repo.putTransportTrip(updated)
-        return json(200, updated)
+        return finalizeAudit(ctx, event, json(200, updated))
       }
     }
 
@@ -1104,21 +1404,21 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const tripId = seg[3]
       if (method === 'POST') {
         const trip = await repo.getTransportTrip(ctx.tenantId, tripId)
-        if (!trip) return jsonError(404, 'NOT_FOUND', 'Viaje no encontrado')
+        if (!trip) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Viaje no encontrado')
         const body = tmsTripCostBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         if (body.data.assetId !== trip.assetId) {
-          return jsonError(400, 'VALIDATION', 'assetId debe coincidir con el viaje')
+          return auditedJsonError(ctx, event, 400, 'VALIDATION', 'assetId debe coincidir con el viaje')
         }
         if (!isKnownCostCategory(body.data.category)) {
-          return jsonError(400, 'VALIDATION', `Categoría de costo desconocida: ${body.data.category}`)
+          return auditedJsonError(ctx, event, 400, 'VALIDATION', `Categoría de costo desconocida: ${body.data.category}`)
         }
         try {
           await requireTransportAsset(ctx.tenantId, body.data.assetId)
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
-          if (msg === 'ASSET_NOT_FOUND') return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
-          if (msg === 'ASSET_NOT_TRANSPORT') return jsonError(400, 'VALIDATION', 'El activo debe ser type transport')
+          if (msg === 'ASSET_NOT_FOUND') return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+          if (msg === 'ASSET_NOT_TRANSPORT') return auditedJsonError(ctx, event, 400, 'VALIDATION', 'El activo debe ser type transport')
           throw e
         }
         const now = new Date().toISOString()
@@ -1134,7 +1434,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           sourceRef: { kind: 'tms_trip', id: tripId },
         }
         await repo.putCostFact(cf)
-        return json(201, cf)
+        return finalizeAudit(ctx, event, json(201, cf))
       }
     }
 
@@ -1142,18 +1442,18 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       const tripId = seg[3]
       if (method === 'POST') {
         const trip = await repo.getTransportTrip(ctx.tenantId, tripId)
-        if (!trip) return jsonError(404, 'NOT_FOUND', 'Viaje no encontrado')
+        if (!trip) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Viaje no encontrado')
         const body = tmsTripRevenueBody.safeParse(parseBody(event.body))
-        if (!body.success) return jsonError(400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         if (body.data.assetId !== trip.assetId) {
-          return jsonError(400, 'VALIDATION', 'assetId debe coincidir con el viaje')
+          return auditedJsonError(ctx, event, 400, 'VALIDATION', 'assetId debe coincidir con el viaje')
         }
         try {
           await requireTransportAsset(ctx.tenantId, body.data.assetId)
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
-          if (msg === 'ASSET_NOT_FOUND') return jsonError(404, 'NOT_FOUND', 'Activo no encontrado')
-          if (msg === 'ASSET_NOT_TRANSPORT') return jsonError(400, 'VALIDATION', 'El activo debe ser type transport')
+          if (msg === 'ASSET_NOT_FOUND') return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+          if (msg === 'ASSET_NOT_TRANSPORT') return auditedJsonError(ctx, event, 400, 'VALIDATION', 'El activo debe ser type transport')
           throw e
         }
         const now = new Date().toISOString()
@@ -1169,21 +1469,21 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           sourceRef: { kind: 'tms_trip', id: tripId },
         }
         await repo.putRevenueFact(rf)
-        return json(201, rf)
+        return finalizeAudit(ctx, event, json(201, rf))
       }
     }
 
     // --- alerts ---
     if (seg[0] === 'v1' && seg[1] === 'alerts' && seg.length === 2) {
       if (method === 'GET') {
-        return json(200, { items: [] })
+        return finalizeAudit(ctx, event, json(200, { items: [] }))
       }
     }
 
-    return jsonError(404, 'NOT_FOUND', `Ruta no implementada: ${method} ${path}`)
+    return auditedJsonError(ctx, event, 404, 'NOT_FOUND', `Ruta no implementada: ${method} ${path}`)
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     console.error(e)
-    return jsonError(500, 'INTERNAL', msg)
+    return auditedJsonError(ctx, event, 500, 'INTERNAL', msg)
   }
 }
