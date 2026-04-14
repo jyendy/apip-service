@@ -1,4 +1,5 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda'
+import { randomUUID } from 'crypto'
 import { resolvePlatformAdmin, resolveRequestContext } from '../auth/context'
 import * as accessRepo from '../repositories/access-repository'
 import * as repo from '../repositories/core-repository'
@@ -1500,7 +1501,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           tenantId: ctx.tenantId,
           providerId: body.data.providerId,
           assetId: body.data.assetId,
-          code: body.data.code,
+          code: body.data.code ?? randomUUID(),
           plate: body.data.plate,
           capacityPackages: body.data.capacityPackages,
           notes: body.data.notes,
