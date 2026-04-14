@@ -300,6 +300,8 @@ export type TmsVehicleUnit = {
   id: string
   tenantId: string
   providerId: string
+  /** Para flota propia: asset transport obligatorio (1:1). Para tercerizados: opcional. */
+  assetId?: string
   code: string
   plate?: string
   capacityPackages?: number

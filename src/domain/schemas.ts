@@ -171,6 +171,7 @@ export const patchTmsDriverBody = createTmsDriverBody.partial().omit({ providerI
 
 export const createTmsVehicleUnitBody = z.object({
   providerId: z.string().min(1),
+  assetId: z.string().min(1).optional(),
   code: z.string().min(1),
   plate: z.string().optional(),
   capacityPackages: z.number().int().positive().optional(),
@@ -248,6 +249,7 @@ export const createTransportTripBody = z.object({
 })
 
 export const patchTransportTripBody = z.object({
+  assetId: z.string().min(1).optional(),
   providerId: z.string().min(1).optional(),
   driverId: z.string().min(1).optional(),
   vehicleUnitId: z.string().min(1).optional(),

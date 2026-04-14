@@ -61,7 +61,13 @@ export async function resolveTmsRateForOrder(
 export async function resolveTripAssignmentDenorm(
   tenantId: string,
   input: { providerId: string; driverId: string; vehicleUnitId: string },
-): Promise<{ providerName: string; driverName: string; vehicleUnitCode: string }> {
+): Promise<{
+  providerName: string
+  providerIsOwnFleet: boolean
+  driverName: string
+  vehicleUnitCode: string
+  vehicleAssetId?: string
+}> {
   const [provider, driver, vehicle] = await Promise.all([
     repo.getTmsProvider(tenantId, input.providerId),
     repo.getTmsDriver(tenantId, input.driverId),
@@ -74,8 +80,10 @@ export async function resolveTripAssignmentDenorm(
   if (vehicle.providerId !== input.providerId) throw new Error('TMS_VEHICLE_PROVIDER_MISMATCH')
   return {
     providerName: provider.name,
+    providerIsOwnFleet: provider.isOwnFleet,
     driverName: driver.name,
     vehicleUnitCode: vehicle.code,
+    vehicleAssetId: vehicle.assetId,
   }
 }
 

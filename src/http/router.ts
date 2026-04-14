@@ -1155,6 +1155,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
               driverId: row.driverId,
               vehicleUnitId: row.vehicleUnitId,
             })
+            if (denormTrip.providerIsOwnFleet && denormTrip.vehicleAssetId !== row.assetId) {
+              throw new Error(
+                `Fila ${i + 2}: En flota propia, el activo del viaje debe coincidir con el assetId de la unidad`,
+              )
+            }
             const trip: TransportTrip = {
               id: newId.tmsTrip(),
               tenantId: ctx.tenantId,
@@ -1471,11 +1476,30 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const provider = await repo.getTmsProvider(ctx.tenantId, body.data.providerId)
         if (!provider) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proveedor no encontrado')
+        if (provider.isOwnFleet) {
+          if (!body.data.assetId) {
+            return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Para flota propia, la unidad requiere assetId')
+          }
+          try {
+            await requireTransportAsset(ctx.tenantId, body.data.assetId)
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e)
+            if (msg === 'ASSET_NOT_FOUND') return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+            if (msg === 'ASSET_NOT_TRANSPORT') return auditedJsonError(ctx, event, 400, 'VALIDATION', 'El activo debe ser type transport')
+            throw e
+          }
+          const existingUnits = await repo.listTmsVehicleUnits(ctx.tenantId)
+          const inUse = existingUnits.some(u => u.assetId && u.assetId === body.data.assetId)
+          if (inUse) {
+            return auditedJsonError(ctx, event, 409, 'CONFLICT', 'El activo ya est\u00e1 asociado a otra unidad TMS')
+          }
+        }
         const now = new Date().toISOString()
         const v: TmsVehicleUnit = {
           id: newId.tmsVehicleUnit(),
           tenantId: ctx.tenantId,
           providerId: body.data.providerId,
+          assetId: body.data.assetId,
           code: body.data.code,
           plate: body.data.plate,
           capacityPackages: body.data.capacityPackages,
@@ -1732,7 +1756,13 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           const ord = await repo.getTransportOrder(ctx.tenantId, oid)
           if (!ord) return auditedJsonError(ctx, event, 400, 'VALIDATION', `Orden no encontrada: ${oid}`)
         }
-        let assignDenorm: { providerName: string; driverName: string; vehicleUnitCode: string }
+        let assignDenorm: {
+          providerName: string
+          providerIsOwnFleet: boolean
+          driverName: string
+          vehicleUnitCode: string
+          vehicleAssetId?: string
+        }
         try {
           assignDenorm = await resolveTripAssignmentDenorm(ctx.tenantId, {
             providerId: body.data.providerId,
@@ -1748,6 +1778,15 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
             return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Conductor/unidad no pertenecen al proveedor indicado')
           }
           throw e
+        }
+        if (assignDenorm.providerIsOwnFleet && assignDenorm.vehicleAssetId !== body.data.assetId) {
+          return auditedJsonError(
+            ctx,
+            event,
+            400,
+            'VALIDATION',
+            'En flota propia, el activo del viaje debe coincidir con el assetId de la unidad',
+          )
         }
         const now = new Date().toISOString()
         const t: TransportTrip = {
@@ -1790,6 +1829,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const updated: TransportTrip = { ...existing, ...body.data, updatedAt: now }
         const touchesAssignment =
           body.data.providerId !== undefined || body.data.driverId !== undefined || body.data.vehicleUnitId !== undefined
+        const touchesTripAsset = body.data.assetId !== undefined
         if (touchesAssignment) {
           if (!updated.providerId || !updated.driverId || !updated.vehicleUnitId) {
             return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Debes indicar proveedor, conductor y unidad')
@@ -1803,6 +1843,42 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
             updated.providerName = denorm.providerName
             updated.driverName = denorm.driverName
             updated.vehicleUnitCode = denorm.vehicleUnitCode
+            if (denorm.providerIsOwnFleet && denorm.vehicleAssetId !== updated.assetId) {
+              return auditedJsonError(
+                ctx,
+                event,
+                400,
+                'VALIDATION',
+                'En flota propia, el activo del viaje debe coincidir con el assetId de la unidad',
+              )
+            }
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e)
+            if (msg === 'TMS_PROVIDER_NOT_FOUND') return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proveedor no encontrado')
+            if (msg === 'TMS_DRIVER_NOT_FOUND') return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Conductor no encontrado')
+            if (msg === 'TMS_VEHICLE_NOT_FOUND') return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Unidad no encontrada')
+            if (msg === 'TMS_DRIVER_PROVIDER_MISMATCH' || msg === 'TMS_VEHICLE_PROVIDER_MISMATCH') {
+              return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Conductor/unidad no pertenecen al proveedor indicado')
+            }
+            throw e
+          }
+        }
+        if (touchesTripAsset && !touchesAssignment) {
+          try {
+            const denorm = await resolveTripAssignmentDenorm(ctx.tenantId, {
+              providerId: updated.providerId,
+              driverId: updated.driverId,
+              vehicleUnitId: updated.vehicleUnitId,
+            })
+            if (denorm.providerIsOwnFleet && denorm.vehicleAssetId !== updated.assetId) {
+              return auditedJsonError(
+                ctx,
+                event,
+                400,
+                'VALIDATION',
+                'En flota propia, el activo del viaje debe coincidir con el assetId de la unidad',
+              )
+            }
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e)
             if (msg === 'TMS_PROVIDER_NOT_FOUND') return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proveedor no encontrado')
