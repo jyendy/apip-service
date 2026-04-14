@@ -10,9 +10,16 @@ import {
   createProjectBody,
   createTenantBody,
   createTmsCustomerBody,
+  createTmsDriverBody,
   createTmsLocalityBody,
+  createTmsProviderBody,
+  createTmsRateBody,
+  createTmsRouteBody,
+  createTmsVehicleUnitBody,
   createTransportOrderBody,
   createTransportTripBody,
+  importTmsOrderTripsBody,
+  importTmsRatesBody,
   importAssetsBody,
   investorLedgerEntryBody,
   listQuery,
@@ -26,6 +33,7 @@ import {
   patchSimulationBody,
   patchTmsCustomerBody,
   patchTmsLocalityBody,
+  patchTmsProviderBody,
   patchTransportOrderBody,
   patchTransportTripBody,
   putAssetCashFlowsBody,
@@ -62,6 +70,8 @@ import {
   buildTmsSummary,
   isKnownCostCategory,
   requireTransportAsset,
+  resolveTmsRateForOrder,
+  resolveTripAssignmentDenorm,
   resolveTransportOrderDenorm,
 } from '../services/tms'
 import type {
@@ -78,7 +88,12 @@ import type {
   Tenant,
   TenantUserProfile,
   TmsCustomer,
+  TmsDriver,
   TmsLocality,
+  TmsRate,
+  TmsRoute,
+  TmsTransportProvider,
+  TmsVehicleUnit,
   TransportOrder,
   TransportTrip,
 } from '../domain/types'
@@ -1037,6 +1052,144 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       }
     }
 
+    if (seg[0] === 'v1' && seg[1] === 'imports' && seg[2] === 'tms-rates' && seg.length === 3) {
+      if (method === 'POST') {
+        const body = importTmsRatesBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.data.rows || body.data.rows.length === 0) {
+          return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Para MVP usa rows inline (Excel se procesa en front)')
+        }
+        const now = new Date().toISOString()
+        const created: TmsRate[] = []
+        const errors: { index: number; message: string }[] = []
+        for (let i = 0; i < body.data.rows.length; i++) {
+          const row = body.data.rows[i]
+          try {
+            const [customer, origin, destination, provider] = await Promise.all([
+              repo.getTmsCustomer(ctx.tenantId, row.customerId),
+              repo.getTmsLocality(ctx.tenantId, row.originLocalityId),
+              repo.getTmsLocality(ctx.tenantId, row.destinationLocalityId),
+              repo.getTmsProvider(ctx.tenantId, row.providerId),
+            ])
+            if (!customer || !origin || !destination || !provider) throw new Error('Referencias inválidas')
+            const rate: TmsRate = {
+              id: newId.tmsRate(),
+              tenantId: ctx.tenantId,
+              customerId: row.customerId,
+              originLocalityId: row.originLocalityId,
+              destinationLocalityId: row.destinationLocalityId,
+              providerId: row.providerId,
+              buyPrice: row.buyPrice,
+              sellPrice: row.sellPrice,
+              currency: (row.currency ?? 'USD').toUpperCase(),
+              validFrom: row.validFrom,
+              validTo: row.validTo,
+              isActive: row.isActive ?? true,
+              notes: row.notes,
+              createdAt: now,
+              updatedAt: now,
+            }
+            await repo.putTmsRate(rate)
+            created.push(rate)
+          } catch (e) {
+            errors.push({ index: i, message: e instanceof Error ? e.message : String(e) })
+          }
+        }
+        return finalizeAudit(ctx, event, json(200, { createdCount: created.length, errorCount: errors.length, errors }))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'imports' && seg[2] === 'tms-order-trips' && seg.length === 3) {
+      if (method === 'POST') {
+        const body = importTmsOrderTripsBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (!body.data.rows || body.data.rows.length === 0) {
+          return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Para MVP usa rows inline (Excel se procesa en front)')
+        }
+        const now = new Date().toISOString()
+        const errors: { index: number; message: string }[] = []
+        const createdOrders: TransportOrder[] = []
+        const createdTrips: TransportTrip[] = []
+        for (let i = 0; i < body.data.rows.length; i++) {
+          const row = body.data.rows[i]
+          try {
+            const denorm = await resolveTransportOrderDenorm(ctx.tenantId, {
+              customerId: row.customerId,
+              originLocalityId: row.originLocalityId,
+              destinationLocalityId: row.destinationLocalityId,
+              providerId: row.providerId,
+            })
+            const rate = await resolveTmsRateForOrder(ctx.tenantId, {
+              customerId: row.customerId,
+              originLocalityId: row.originLocalityId,
+              destinationLocalityId: row.destinationLocalityId,
+              providerId: row.providerId,
+              atIso: row.scheduledDate,
+            })
+            const order: TransportOrder = {
+              id: newId.tmsOrder(),
+              tenantId: ctx.tenantId,
+              customerId: row.customerId,
+              originLocalityId: row.originLocalityId,
+              destinationLocalityId: row.destinationLocalityId,
+              customerName: denorm.customerName,
+              originLabel: denorm.originLabel,
+              destinationLabel: denorm.destinationLabel,
+              packageCount: row.packageCount,
+              providerId: row.providerId,
+              providerName: denorm.providerName,
+              rateId: rate.id,
+              sellPrice: rate.sellPrice,
+              buyPrice: rate.buyPrice,
+              currency: rate.currency,
+              marginAmount: rate.sellPrice - rate.buyPrice,
+              cargoDescription: row.cargoDescription,
+              scheduledDate: row.scheduledDate,
+              status: row.orderStatus ?? 'CREATED',
+              createdAt: now,
+              updatedAt: now,
+            }
+            await repo.putTransportOrder(order)
+            const denormTrip = await resolveTripAssignmentDenorm(ctx.tenantId, {
+              providerId: row.providerId,
+              driverId: row.driverId,
+              vehicleUnitId: row.vehicleUnitId,
+            })
+            const trip: TransportTrip = {
+              id: newId.tmsTrip(),
+              tenantId: ctx.tenantId,
+              assetId: row.assetId,
+              orderIds: [order.id],
+              routeId: row.routeId,
+              providerId: row.providerId,
+              providerName: denormTrip.providerName,
+              driverId: row.driverId,
+              driverName: denormTrip.driverName,
+              vehicleUnitId: row.vehicleUnitId,
+              vehicleUnitCode: denormTrip.vehicleUnitCode,
+              startDate: row.startDate,
+              endDate: row.endDate,
+              distanceKm: row.distanceKm,
+              status: row.tripStatus ?? 'PLANNED',
+              createdAt: now,
+              updatedAt: now,
+            }
+            await repo.putTransportTrip(trip)
+            createdOrders.push(order)
+            createdTrips.push(trip)
+          } catch (e) {
+            errors.push({ index: i, message: e instanceof Error ? e.message : String(e) })
+          }
+        }
+        return finalizeAudit(ctx, event, json(200, {
+          createdOrders: createdOrders.length,
+          createdTrips: createdTrips.length,
+          errorCount: errors.length,
+          errors,
+        }))
+      }
+    }
+
     // --- simulations ---
     if (seg[0] === 'v1' && seg[1] === 'simulations' && seg.length === 2) {
       if (method === 'GET') {
@@ -1238,6 +1391,168 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       }
     }
 
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'providers' && seg.length === 3) {
+      if (method === 'GET') {
+        const items = await repo.listTmsProviders(ctx.tenantId)
+        return finalizeAudit(ctx, event, json(200, { items }))
+      }
+      if (method === 'POST') {
+        const body = createTmsProviderBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const p: TmsTransportProvider = {
+          id: newId.tmsProvider(),
+          tenantId: ctx.tenantId,
+          name: body.data.name,
+          isOwnFleet: body.data.isOwnFleet ?? false,
+          taxId: body.data.taxId,
+          notes: body.data.notes,
+          createdAt: now,
+          updatedAt: now,
+        }
+        await repo.putTmsProvider(p)
+        return finalizeAudit(ctx, event, json(201, p))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'providers' && seg[3] && seg.length === 4) {
+      const providerId = seg[3]
+      if (method === 'GET') {
+        const p = await repo.getTmsProvider(ctx.tenantId, providerId)
+        if (!p) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proveedor no encontrado')
+        return finalizeAudit(ctx, event, json(200, p))
+      }
+      if (method === 'PATCH') {
+        const existing = await repo.getTmsProvider(ctx.tenantId, providerId)
+        if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proveedor no encontrado')
+        const body = patchTmsProviderBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const updated: TmsTransportProvider = { ...existing, ...body.data, updatedAt: now }
+        await repo.putTmsProvider(updated)
+        return finalizeAudit(ctx, event, json(200, updated))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'drivers' && seg.length === 3) {
+      if (method === 'GET') {
+        const items = await repo.listTmsDrivers(ctx.tenantId)
+        return finalizeAudit(ctx, event, json(200, { items }))
+      }
+      if (method === 'POST') {
+        const body = createTmsDriverBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const provider = await repo.getTmsProvider(ctx.tenantId, body.data.providerId)
+        if (!provider) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proveedor no encontrado')
+        const now = new Date().toISOString()
+        const d: TmsDriver = {
+          id: newId.tmsDriver(),
+          tenantId: ctx.tenantId,
+          providerId: body.data.providerId,
+          name: body.data.name,
+          licenseNumber: body.data.licenseNumber,
+          phone: body.data.phone,
+          notes: body.data.notes,
+          createdAt: now,
+          updatedAt: now,
+        }
+        await repo.putTmsDriver(d)
+        return finalizeAudit(ctx, event, json(201, d))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'vehicle-units' && seg.length === 3) {
+      if (method === 'GET') {
+        const items = await repo.listTmsVehicleUnits(ctx.tenantId)
+        return finalizeAudit(ctx, event, json(200, { items }))
+      }
+      if (method === 'POST') {
+        const body = createTmsVehicleUnitBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const provider = await repo.getTmsProvider(ctx.tenantId, body.data.providerId)
+        if (!provider) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proveedor no encontrado')
+        const now = new Date().toISOString()
+        const v: TmsVehicleUnit = {
+          id: newId.tmsVehicleUnit(),
+          tenantId: ctx.tenantId,
+          providerId: body.data.providerId,
+          code: body.data.code,
+          plate: body.data.plate,
+          capacityPackages: body.data.capacityPackages,
+          notes: body.data.notes,
+          createdAt: now,
+          updatedAt: now,
+        }
+        await repo.putTmsVehicleUnit(v)
+        return finalizeAudit(ctx, event, json(201, v))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'rates' && seg.length === 3) {
+      if (method === 'GET') {
+        const items = await repo.listTmsRates(ctx.tenantId)
+        return finalizeAudit(ctx, event, json(200, { items }))
+      }
+      if (method === 'POST') {
+        const body = createTmsRateBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const [customer, origin, destination, provider] = await Promise.all([
+          repo.getTmsCustomer(ctx.tenantId, body.data.customerId),
+          repo.getTmsLocality(ctx.tenantId, body.data.originLocalityId),
+          repo.getTmsLocality(ctx.tenantId, body.data.destinationLocalityId),
+          repo.getTmsProvider(ctx.tenantId, body.data.providerId),
+        ])
+        if (!customer || !origin || !destination || !provider) {
+          return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Cliente/origen/destino/proveedor no encontrado')
+        }
+        const now = new Date().toISOString()
+        const rate: TmsRate = {
+          id: newId.tmsRate(),
+          tenantId: ctx.tenantId,
+          customerId: body.data.customerId,
+          originLocalityId: body.data.originLocalityId,
+          destinationLocalityId: body.data.destinationLocalityId,
+          providerId: body.data.providerId,
+          buyPrice: body.data.buyPrice,
+          sellPrice: body.data.sellPrice,
+          currency: (body.data.currency ?? 'USD').toUpperCase(),
+          validFrom: body.data.validFrom,
+          validTo: body.data.validTo,
+          isActive: body.data.isActive ?? true,
+          notes: body.data.notes,
+          createdAt: now,
+          updatedAt: now,
+        }
+        await repo.putTmsRate(rate)
+        return finalizeAudit(ctx, event, json(201, rate))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'routes' && seg.length === 3) {
+      if (method === 'GET') {
+        const items = await repo.listTmsRoutes(ctx.tenantId)
+        return finalizeAudit(ctx, event, json(200, { items }))
+      }
+      if (method === 'POST') {
+        const body = createTmsRouteBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const route: TmsRoute = {
+          id: newId.tmsRoute(),
+          tenantId: ctx.tenantId,
+          name: body.data.name,
+          originLocalityId: body.data.originLocalityId,
+          destinationLocalityId: body.data.destinationLocalityId,
+          stops: body.data.stops.map(s => ({ ...s, id: newId.tmsRouteStop() })),
+          notes: body.data.notes,
+          createdAt: now,
+          updatedAt: now,
+        }
+        await repo.putTmsRoute(route)
+        return finalizeAudit(ctx, event, json(201, route))
+      }
+    }
+
     if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'orders' && seg.length === 3) {
       if (method === 'GET') {
         const items = await repo.listTransportOrders(ctx.tenantId)
@@ -1246,12 +1561,13 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'POST') {
         const body = createTransportOrderBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
-        let denorm: { customerName: string; originLabel: string; destinationLabel: string }
+        let denorm: { customerName: string; originLabel: string; destinationLabel: string; providerName: string }
         try {
           denorm = await resolveTransportOrderDenorm(ctx.tenantId, {
             customerId: body.data.customerId,
             originLocalityId: body.data.originLocalityId,
             destinationLocalityId: body.data.destinationLocalityId,
+            providerId: body.data.providerId,
           })
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
@@ -1260,6 +1576,25 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           }
           if (msg === 'TMS_LOCALITY_NOT_FOUND') {
             return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Localidad no encontrada')
+          }
+          if (msg === 'TMS_PROVIDER_NOT_FOUND') {
+            return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proveedor no encontrado')
+          }
+          throw e
+        }
+        let rate: Awaited<ReturnType<typeof resolveTmsRateForOrder>>
+        try {
+          rate = await resolveTmsRateForOrder(ctx.tenantId, {
+            customerId: body.data.customerId,
+            originLocalityId: body.data.originLocalityId,
+            destinationLocalityId: body.data.destinationLocalityId,
+            providerId: body.data.providerId,
+            atIso: body.data.scheduledDate,
+          })
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          if (msg === 'TMS_RATE_NOT_FOUND') {
+            return auditedJsonError(ctx, event, 400, 'VALIDATION', 'No hay tarifa vigente para cliente/origen/destino/proveedor')
           }
           throw e
         }
@@ -1273,9 +1608,16 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           customerName: denorm.customerName,
           originLabel: denorm.originLabel,
           destinationLabel: denorm.destinationLabel,
+          packageCount: body.data.packageCount,
+          providerId: body.data.providerId,
+          providerName: denorm.providerName,
+          rateId: rate.id,
+          sellPrice: rate.sellPrice,
+          buyPrice: rate.buyPrice,
+          currency: rate.currency,
+          marginAmount: rate.sellPrice - rate.buyPrice,
           cargoDescription: body.data.cargoDescription,
           scheduledDate: body.data.scheduledDate,
-          expectedRevenue: body.data.expectedRevenue,
           status: body.data.status ?? 'CREATED',
           createdAt: now,
           updatedAt: now,
@@ -1302,19 +1644,22 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const touchedCat =
           body.data.customerId !== undefined ||
           body.data.originLocalityId !== undefined ||
-          body.data.destinationLocalityId !== undefined
+          body.data.destinationLocalityId !== undefined ||
+          body.data.providerId !== undefined ||
+          body.data.scheduledDate !== undefined
         if (touchedCat) {
           if (
             !updated.customerId ||
             !updated.originLocalityId ||
-            !updated.destinationLocalityId
+            !updated.destinationLocalityId ||
+            !updated.providerId
           ) {
             return auditedJsonError(
               ctx,
               event,
               400,
               'VALIDATION',
-              'Si actualizas catálogo, indica cliente, origen y destino',
+              'Si actualizas catálogo, indica cliente, origen, destino y proveedor',
             )
           }
           try {
@@ -1322,10 +1667,12 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
               customerId: updated.customerId,
               originLocalityId: updated.originLocalityId,
               destinationLocalityId: updated.destinationLocalityId,
+              providerId: updated.providerId,
             })
             updated.customerName = denorm.customerName
             updated.originLabel = denorm.originLabel
             updated.destinationLabel = denorm.destinationLabel
+            updated.providerName = denorm.providerName
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e)
             if (msg === 'TMS_CUSTOMER_NOT_FOUND') {
@@ -1333,6 +1680,29 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
             }
             if (msg === 'TMS_LOCALITY_NOT_FOUND') {
               return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Localidad no encontrada')
+            }
+            if (msg === 'TMS_PROVIDER_NOT_FOUND') {
+              return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proveedor no encontrado')
+            }
+            throw e
+          }
+          try {
+            const rate = await resolveTmsRateForOrder(ctx.tenantId, {
+              customerId: updated.customerId,
+              originLocalityId: updated.originLocalityId,
+              destinationLocalityId: updated.destinationLocalityId,
+              providerId: updated.providerId,
+              atIso: updated.scheduledDate,
+            })
+            updated.rateId = rate.id
+            updated.sellPrice = rate.sellPrice
+            updated.buyPrice = rate.buyPrice
+            updated.currency = rate.currency
+            updated.marginAmount = rate.sellPrice - rate.buyPrice
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e)
+            if (msg === 'TMS_RATE_NOT_FOUND') {
+              return auditedJsonError(ctx, event, 400, 'VALIDATION', 'No hay tarifa vigente para cliente/origen/destino/proveedor')
             }
             throw e
           }
@@ -1362,13 +1732,36 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           const ord = await repo.getTransportOrder(ctx.tenantId, oid)
           if (!ord) return auditedJsonError(ctx, event, 400, 'VALIDATION', `Orden no encontrada: ${oid}`)
         }
+        let assignDenorm: { providerName: string; driverName: string; vehicleUnitCode: string }
+        try {
+          assignDenorm = await resolveTripAssignmentDenorm(ctx.tenantId, {
+            providerId: body.data.providerId,
+            driverId: body.data.driverId,
+            vehicleUnitId: body.data.vehicleUnitId,
+          })
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          if (msg === 'TMS_PROVIDER_NOT_FOUND') return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proveedor no encontrado')
+          if (msg === 'TMS_DRIVER_NOT_FOUND') return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Conductor no encontrado')
+          if (msg === 'TMS_VEHICLE_NOT_FOUND') return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Unidad no encontrada')
+          if (msg === 'TMS_DRIVER_PROVIDER_MISMATCH' || msg === 'TMS_VEHICLE_PROVIDER_MISMATCH') {
+            return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Conductor/unidad no pertenecen al proveedor indicado')
+          }
+          throw e
+        }
         const now = new Date().toISOString()
         const t: TransportTrip = {
           id: newId.tmsTrip(),
           tenantId: ctx.tenantId,
           assetId: body.data.assetId,
           orderIds: body.data.orderIds,
-          driver: body.data.driver,
+          routeId: body.data.routeId,
+          providerId: body.data.providerId,
+          providerName: assignDenorm.providerName,
+          driverId: body.data.driverId,
+          driverName: assignDenorm.driverName,
+          vehicleUnitId: body.data.vehicleUnitId,
+          vehicleUnitCode: assignDenorm.vehicleUnitCode,
           startDate: body.data.startDate,
           endDate: body.data.endDate,
           distanceKm: body.data.distanceKm,
@@ -1395,6 +1788,32 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const updated: TransportTrip = { ...existing, ...body.data, updatedAt: now }
+        const touchesAssignment =
+          body.data.providerId !== undefined || body.data.driverId !== undefined || body.data.vehicleUnitId !== undefined
+        if (touchesAssignment) {
+          if (!updated.providerId || !updated.driverId || !updated.vehicleUnitId) {
+            return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Debes indicar proveedor, conductor y unidad')
+          }
+          try {
+            const denorm = await resolveTripAssignmentDenorm(ctx.tenantId, {
+              providerId: updated.providerId,
+              driverId: updated.driverId,
+              vehicleUnitId: updated.vehicleUnitId,
+            })
+            updated.providerName = denorm.providerName
+            updated.driverName = denorm.driverName
+            updated.vehicleUnitCode = denorm.vehicleUnitCode
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e)
+            if (msg === 'TMS_PROVIDER_NOT_FOUND') return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proveedor no encontrado')
+            if (msg === 'TMS_DRIVER_NOT_FOUND') return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Conductor no encontrado')
+            if (msg === 'TMS_VEHICLE_NOT_FOUND') return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Unidad no encontrada')
+            if (msg === 'TMS_DRIVER_PROVIDER_MISMATCH' || msg === 'TMS_VEHICLE_PROVIDER_MISMATCH') {
+              return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Conductor/unidad no pertenecen al proveedor indicado')
+            }
+            throw e
+          }
+        }
         await repo.putTransportTrip(updated)
         return finalizeAudit(ctx, event, json(200, updated))
       }

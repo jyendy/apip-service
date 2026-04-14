@@ -21,5 +21,11 @@ export const newId = {
   tmsTrip: () => shortId('trip'),
   tmsCustomer: () => shortId('tcu'),
   tmsLocality: () => shortId('tloc'),
+  tmsProvider: () => shortId('tprv'),
+  tmsDriver: () => shortId('tdrv'),
+  tmsVehicleUnit: () => shortId('tveh'),
+  tmsRate: () => shortId('trate'),
+  tmsRoute: () => shortId('trte'),
+  tmsRouteStop: () => shortId('tstop'),
   accessRole: () => shortId('role'),
 }

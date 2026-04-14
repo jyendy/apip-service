@@ -137,20 +137,89 @@ export const patchTmsCustomerBody = createTmsCustomerBody.partial()
 
 export const createTmsLocalityBody = z.object({
   name: z.string().min(1),
+  addressLine1: z.string().optional(),
+  addressLine2: z.string().optional(),
+  city: z.string().optional(),
   region: z.string().optional(),
+  postalCode: z.string().optional(),
   country: z.string().optional(),
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
   notes: z.string().optional(),
 })
 
 export const patchTmsLocalityBody = createTmsLocalityBody.partial()
 
+export const createTmsProviderBody = z.object({
+  name: z.string().min(1),
+  isOwnFleet: z.boolean().optional(),
+  taxId: z.string().optional(),
+  notes: z.string().optional(),
+})
+
+export const patchTmsProviderBody = createTmsProviderBody.partial()
+
+export const createTmsDriverBody = z.object({
+  providerId: z.string().min(1),
+  name: z.string().min(1),
+  licenseNumber: z.string().optional(),
+  phone: z.string().optional(),
+  notes: z.string().optional(),
+})
+
+export const patchTmsDriverBody = createTmsDriverBody.partial().omit({ providerId: true })
+
+export const createTmsVehicleUnitBody = z.object({
+  providerId: z.string().min(1),
+  code: z.string().min(1),
+  plate: z.string().optional(),
+  capacityPackages: z.number().int().positive().optional(),
+  notes: z.string().optional(),
+})
+
+export const patchTmsVehicleUnitBody = createTmsVehicleUnitBody.partial().omit({ providerId: true })
+
+export const createTmsRateBody = z.object({
+  customerId: z.string().min(1),
+  originLocalityId: z.string().min(1),
+  destinationLocalityId: z.string().min(1),
+  providerId: z.string().min(1),
+  buyPrice: z.number().nonnegative(),
+  sellPrice: z.number().nonnegative(),
+  currency: z.string().length(3).default('USD'),
+  validFrom: z.string().datetime(),
+  validTo: z.string().datetime().optional(),
+  isActive: z.boolean().optional(),
+  notes: z.string().optional(),
+})
+
+export const patchTmsRateBody = createTmsRateBody.partial()
+
+export const createTmsRouteBody = z.object({
+  name: z.string().min(1),
+  originLocalityId: z.string().min(1),
+  destinationLocalityId: z.string().min(1),
+  stops: z.array(
+    z.object({
+      sequence: z.number().int().positive(),
+      localityId: z.string().min(1),
+      type: z.enum(['PICKUP', 'DROPOFF']),
+      notes: z.string().optional(),
+    }),
+  ),
+  notes: z.string().optional(),
+})
+
+export const patchTmsRouteBody = createTmsRouteBody.partial()
+
 export const createTransportOrderBody = z.object({
   customerId: z.string().min(1),
   originLocalityId: z.string().min(1),
   destinationLocalityId: z.string().min(1),
+  providerId: z.string().min(1),
+  packageCount: z.number().int().positive(),
   cargoDescription: z.string().min(1),
   scheduledDate: z.string().datetime(),
-  expectedRevenue: z.number().nonnegative(),
   status: z.enum(['CREATED', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED']).optional(),
 })
 
@@ -158,16 +227,20 @@ export const patchTransportOrderBody = z.object({
   customerId: z.string().min(1).optional(),
   originLocalityId: z.string().min(1).optional(),
   destinationLocalityId: z.string().min(1).optional(),
+  providerId: z.string().min(1).optional(),
+  packageCount: z.number().int().positive().optional(),
   cargoDescription: z.string().min(1).optional(),
   scheduledDate: z.string().datetime().optional(),
-  expectedRevenue: z.number().nonnegative().optional(),
   status: z.enum(['CREATED', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED']).optional(),
 })
 
 export const createTransportTripBody = z.object({
   assetId: z.string().min(1),
   orderIds: z.array(z.string().min(1)).min(1),
-  driver: z.string().min(1),
+  providerId: z.string().min(1),
+  driverId: z.string().min(1),
+  vehicleUnitId: z.string().min(1),
+  routeId: z.string().min(1).optional(),
   startDate: z.string().datetime().optional(),
   endDate: z.string().datetime().optional(),
   distanceKm: z.number().nonnegative().optional(),
@@ -175,12 +248,60 @@ export const createTransportTripBody = z.object({
 })
 
 export const patchTransportTripBody = z.object({
-  driver: z.string().min(1).optional(),
+  providerId: z.string().min(1).optional(),
+  driverId: z.string().min(1).optional(),
+  vehicleUnitId: z.string().min(1).optional(),
+  routeId: z.string().min(1).optional(),
   startDate: z.string().datetime().optional(),
   endDate: z.string().datetime().optional(),
   distanceKm: z.number().nonnegative().optional(),
   status: z.enum(['PLANNED', 'IN_PROGRESS', 'COMPLETED']).optional(),
   orderIds: z.array(z.string().min(1)).optional(),
+})
+
+const importTmsRateRowSchema = z.object({
+  customerId: z.string().min(1),
+  originLocalityId: z.string().min(1),
+  destinationLocalityId: z.string().min(1),
+  providerId: z.string().min(1),
+  buyPrice: z.number().nonnegative(),
+  sellPrice: z.number().nonnegative(),
+  currency: z.string().length(3).optional(),
+  validFrom: z.string().datetime(),
+  validTo: z.string().datetime().optional(),
+  isActive: z.boolean().optional(),
+  notes: z.string().optional(),
+})
+
+export const importTmsRatesBody = z.object({
+  fileName: z.string().min(1).optional(),
+  templateVersion: z.string().optional(),
+  rows: z.array(importTmsRateRowSchema).max(3000).optional(),
+})
+
+const importTmsOrderTripRowSchema = z.object({
+  customerId: z.string().min(1),
+  originLocalityId: z.string().min(1),
+  destinationLocalityId: z.string().min(1),
+  providerId: z.string().min(1),
+  packageCount: z.number().int().positive(),
+  cargoDescription: z.string().min(1),
+  scheduledDate: z.string().datetime(),
+  orderStatus: z.enum(['CREATED', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED']).optional(),
+  assetId: z.string().min(1),
+  driverId: z.string().min(1),
+  vehicleUnitId: z.string().min(1),
+  tripStatus: z.enum(['PLANNED', 'IN_PROGRESS', 'COMPLETED']).optional(),
+  routeId: z.string().min(1).optional(),
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
+  distanceKm: z.number().nonnegative().optional(),
+})
+
+export const importTmsOrderTripsBody = z.object({
+  fileName: z.string().min(1).optional(),
+  templateVersion: z.string().optional(),
+  rows: z.array(importTmsOrderTripRowSchema).max(3000).optional(),
 })
 
 export const tmsTripCostBody = z.object({

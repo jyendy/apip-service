@@ -260,8 +260,89 @@ export type TmsLocality = {
   id: string
   tenantId: string
   name: string
+  addressLine1?: string
+  addressLine2?: string
+  city?: string
   region?: string
+  postalCode?: string
   country?: string
+  latitude?: number
+  longitude?: number
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type TmsTransportProvider = {
+  id: string
+  tenantId: string
+  name: string
+  isOwnFleet: boolean
+  taxId?: string
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type TmsDriver = {
+  id: string
+  tenantId: string
+  providerId: string
+  name: string
+  licenseNumber?: string
+  phone?: string
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type TmsVehicleUnit = {
+  id: string
+  tenantId: string
+  providerId: string
+  code: string
+  plate?: string
+  capacityPackages?: number
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type TmsRate = {
+  id: string
+  tenantId: string
+  customerId: string
+  originLocalityId: string
+  destinationLocalityId: string
+  providerId: string
+  buyPrice: number
+  sellPrice: number
+  currency: string
+  validFrom: string
+  validTo?: string
+  isActive: boolean
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type TmsRouteStopType = 'PICKUP' | 'DROPOFF'
+
+export type TmsRouteStop = {
+  id: string
+  sequence: number
+  localityId: string
+  type: TmsRouteStopType
+  notes?: string
+}
+
+export type TmsRoute = {
+  id: string
+  tenantId: string
+  name: string
+  originLocalityId: string
+  destinationLocalityId: string
+  stops: TmsRouteStop[]
   notes?: string
   createdAt: string
   updatedAt: string
@@ -278,9 +359,16 @@ export type TransportOrder = {
   customerName: string
   originLabel: string
   destinationLabel: string
+  packageCount: number
+  providerId: string
+  providerName: string
+  rateId: string
+  sellPrice: number
+  buyPrice: number
+  currency: string
+  marginAmount: number
   cargoDescription: string
   scheduledDate: string
-  expectedRevenue: number
   status: TransportOrderStatus
   createdAt: string
   updatedAt: string
@@ -294,7 +382,13 @@ export type TransportTrip = {
   tenantId: string
   assetId: string
   orderIds: string[]
-  driver: string
+  routeId?: string
+  providerId: string
+  providerName: string
+  driverId: string
+  driverName: string
+  vehicleUnitId: string
+  vehicleUnitCode: string
   startDate?: string
   endDate?: string
   distanceKm?: number

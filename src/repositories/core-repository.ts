@@ -18,7 +18,12 @@ import type {
   Simulation,
   Tenant,
   TmsCustomer,
+  TmsDriver,
   TmsLocality,
+  TmsRate,
+  TmsRoute,
+  TmsTransportProvider,
+  TmsVehicleUnit,
   TransportOrder,
   TransportTrip,
 } from '../domain/types'
@@ -42,6 +47,11 @@ const ENTITY = {
   TMS_TRIP: 'TMS_TRIP',
   TMS_CUSTOMER: 'TMS_CUSTOMER',
   TMS_LOCALITY: 'TMS_LOCALITY',
+  TMS_PROVIDER: 'TMS_PROVIDER',
+  TMS_DRIVER: 'TMS_DRIVER',
+  TMS_VEHICLE_UNIT: 'TMS_VEHICLE_UNIT',
+  TMS_RATE: 'TMS_RATE',
+  TMS_ROUTE: 'TMS_ROUTE',
 } as const
 
 type CoreItem = Record<string, unknown> & { PK: string; SK: string }
@@ -754,6 +764,206 @@ export async function putTmsLocality(l: TmsLocality): Promise<void> {
       Item: baseItem(l.tenantId, keys.skTmsLocality(l.id), {
         entityType: ENTITY.TMS_LOCALITY,
         ...l,
+      }),
+    }),
+  )
+}
+
+export async function listTmsProviders(tenantId: string): Promise<TmsTransportProvider[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': 'TMS#PROVIDER#',
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as TmsTransportProvider[]
+}
+
+export async function getTmsProvider(tenantId: string, providerId: string): Promise<TmsTransportProvider | null> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new GetCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skTmsProvider(providerId) },
+    }),
+  )
+  if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.TMS_PROVIDER) return null
+  return r.Item as unknown as TmsTransportProvider
+}
+
+export async function putTmsProvider(p: TmsTransportProvider): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(p.tenantId, keys.skTmsProvider(p.id), {
+        entityType: ENTITY.TMS_PROVIDER,
+        ...p,
+      }),
+    }),
+  )
+}
+
+export async function listTmsDrivers(tenantId: string): Promise<TmsDriver[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': 'TMS#DRIVER#',
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as TmsDriver[]
+}
+
+export async function getTmsDriver(tenantId: string, driverId: string): Promise<TmsDriver | null> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new GetCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skTmsDriver(driverId) },
+    }),
+  )
+  if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.TMS_DRIVER) return null
+  return r.Item as unknown as TmsDriver
+}
+
+export async function putTmsDriver(d: TmsDriver): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(d.tenantId, keys.skTmsDriver(d.id), {
+        entityType: ENTITY.TMS_DRIVER,
+        ...d,
+      }),
+    }),
+  )
+}
+
+export async function listTmsVehicleUnits(tenantId: string): Promise<TmsVehicleUnit[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': 'TMS#VEHICLE#',
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as TmsVehicleUnit[]
+}
+
+export async function getTmsVehicleUnit(tenantId: string, vehicleUnitId: string): Promise<TmsVehicleUnit | null> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new GetCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skTmsVehicleUnit(vehicleUnitId) },
+    }),
+  )
+  if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.TMS_VEHICLE_UNIT) return null
+  return r.Item as unknown as TmsVehicleUnit
+}
+
+export async function putTmsVehicleUnit(v: TmsVehicleUnit): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(v.tenantId, keys.skTmsVehicleUnit(v.id), {
+        entityType: ENTITY.TMS_VEHICLE_UNIT,
+        ...v,
+      }),
+    }),
+  )
+}
+
+export async function listTmsRates(tenantId: string): Promise<TmsRate[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': 'TMS#RATE#',
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as TmsRate[]
+}
+
+export async function getTmsRate(tenantId: string, rateId: string): Promise<TmsRate | null> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new GetCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skTmsRate(rateId) },
+    }),
+  )
+  if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.TMS_RATE) return null
+  return r.Item as unknown as TmsRate
+}
+
+export async function putTmsRate(rate: TmsRate): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(rate.tenantId, keys.skTmsRate(rate.id), {
+        entityType: ENTITY.TMS_RATE,
+        ...rate,
+      }),
+    }),
+  )
+}
+
+export async function listTmsRoutes(tenantId: string): Promise<TmsRoute[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': 'TMS#ROUTE#',
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as TmsRoute[]
+}
+
+export async function getTmsRoute(tenantId: string, routeId: string): Promise<TmsRoute | null> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new GetCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skTmsRoute(routeId) },
+    }),
+  )
+  if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.TMS_ROUTE) return null
+  return r.Item as unknown as TmsRoute
+}
+
+export async function putTmsRoute(route: TmsRoute): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(route.tenantId, keys.skTmsRoute(route.id), {
+        entityType: ENTITY.TMS_ROUTE,
+        ...route,
       }),
     }),
   )

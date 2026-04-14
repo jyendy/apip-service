@@ -41,6 +41,16 @@ export const skTmsCustomer = (customerId: string) => `TMS#CUSTOMER#${customerId}
 
 export const skTmsLocality = (localityId: string) => `TMS#LOCALITY#${localityId}`
 
+export const skTmsProvider = (providerId: string) => `TMS#PROVIDER#${providerId}`
+
+export const skTmsDriver = (driverId: string) => `TMS#DRIVER#${driverId}`
+
+export const skTmsVehicleUnit = (vehicleUnitId: string) => `TMS#VEHICLE#${vehicleUnitId}`
+
+export const skTmsRate = (rateId: string) => `TMS#RATE#${rateId}`
+
+export const skTmsRoute = (routeId: string) => `TMS#ROUTE#${routeId}`
+
 export const skAccessRole = (roleId: string) => `ROLE#${roleId}`
 
 export const skUserProfile = (cognitoSub: string) => `USER#${cognitoSub}`
