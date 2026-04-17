@@ -301,15 +301,6 @@ function financingStartOffsetMonths(acqYm: string, startIso: string): number {
   return monthsBetweenYm(acqYm, startYm)
 }
 
-function buildDebtServiceByAssetMonth(totalMonths: number, offset: number, schedule: { payment: number }[]): number[] {
-  const debt = new Array<number>(totalMonths).fill(0)
-  for (let k = 0; k < schedule.length; k++) {
-    const i = offset + k
-    if (i >= 0 && i < totalMonths) debt[i] = schedule[k]!.payment
-  }
-  return debt
-}
-
 /**
  * Métricas del activo (sin deuda) + métricas equity (apalancado) y snapshot de financiamiento.
  * La vista `asset` coincide con `computeAssetMetrics`; la vista `equity` descuenta la cuota del préstamo (no mezclada con costos operativos).
