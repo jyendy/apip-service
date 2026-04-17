@@ -267,6 +267,51 @@ export type AmortizationPayment = {
   remainingBalance: number
 }
 
+/** Severidad de un insight financiero (motor de reglas). */
+export type FinancialInsightSeverity = 'critical' | 'warning' | 'info' | 'positive'
+
+/** Salida del motor de insights financieros. */
+export type FinancialInsight = {
+  severity: FinancialInsightSeverity
+  message: string
+  recommendation?: string
+  priority: number
+}
+
+/** Regla persistida evaluada con JEXL. */
+export type InsightRule = {
+  id: string
+  name: string
+  description?: string
+  severity: FinancialInsightSeverity
+  scope: 'asset' | 'equity' | 'both'
+  condition: string
+  message: string
+  recommendation?: string
+  priority: number
+  isActive: boolean
+  createdAt: string
+}
+
+/** Entrada al motor (variables en `condition`). */
+export type FinancialInsightInput = {
+  assetMetrics: {
+    roi: number
+    irr: number
+    npv: number
+    payback: number
+  }
+  equityMetrics?: {
+    roi: number
+    irr: number
+    npv: number
+    payback: number
+  }
+  avgOperatingCashFlow: number
+  avgDebtService: number
+  durationMonths: number
+}
+
 export type AssetMetricsComputed = {
   assetId: string
   initialInvestment: number
@@ -306,6 +351,11 @@ export type AssetFinancialMetricsPackage = {
     monthlyPayment: number
     schedule: AmortizationPayment[]
   } | null
+  /** Insights generados por reglas en base de datos (máx. 5 por vista). */
+  insights?: {
+    asset: FinancialInsight[]
+    equity: FinancialInsight[] | null
+  }
 }
 
 /** TMS — orden de transporte (operacional; no métricas financieras). */

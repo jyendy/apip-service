@@ -52,6 +52,11 @@ import { newId } from '../lib/ids'
 import { publishDomainEvent } from '../lib/events'
 import { CALCULATION_VERSION } from '../financial/engine'
 import { computeAssetFinancialPackage, computeAssetMetrics } from '../services/metrics'
+import {
+  buildFinancialInsightInput,
+  generateFinancialInsights,
+} from '../services/financial-insights-engine'
+import * as insightRulesRepo from '../repositories/insight-rules-repository'
 import { computeSimulationProjection } from '../services/simulation-projection'
 import { buildStandardizedStructure } from '../services/structure'
 import { buildInsights } from '../services/insights'
@@ -365,7 +370,20 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const cost = await repo.listCostFacts(ctx.tenantId, assetId)
         const fin = await repo.getFinancing(ctx.tenantId, assetId)
         const pkg = computeAssetFinancialPackage(a, rev, cost, fin)
-        return finalizeAudit(ctx, event, json(200, pkg))
+        const rules = await insightRulesRepo.listInsightRulesForTenant(ctx.tenantId)
+        const insightInput = buildFinancialInsightInput(a, pkg)
+        const insightsAsset = generateFinancialInsights(rules, insightInput, 'asset')
+        const insightsEquity = pkg.metrics.equity
+          ? generateFinancialInsights(rules, insightInput, 'equity')
+          : null
+        return finalizeAudit(
+          ctx,
+          event,
+          json(200, {
+            ...pkg,
+            insights: { asset: insightsAsset, equity: insightsEquity },
+          }),
+        )
       }
     }
 

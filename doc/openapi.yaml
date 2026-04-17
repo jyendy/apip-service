@@ -170,6 +170,46 @@ components:
           $ref: '#/components/schemas/MetricsCoverage'
         calculationVersion: { type: string }
 
+    FinancialInsight:
+      type: object
+      required: [severity, message, priority]
+      properties:
+        severity:
+          type: string
+          enum: [critical, warning, info, positive]
+        message: { type: string }
+        recommendation: { type: string }
+        priority: { type: number }
+
+    AssetFinancialMetricsResponse:
+      type: object
+      required: [assetId, calculationVersion, metrics]
+      properties:
+        assetId: { type: string }
+        calculationVersion: { type: string }
+        metrics:
+          type: object
+          required: [asset, equity]
+          properties:
+            asset: { $ref: '#/components/schemas/AssetMetrics' }
+            equity:
+              oneOf:
+                - { $ref: '#/components/schemas/AssetMetrics' }
+                - { type: 'null' }
+        financing:
+          type: object
+          nullable: true
+        insights:
+          type: object
+          properties:
+            asset:
+              type: array
+              items: { $ref: '#/components/schemas/FinancialInsight' }
+            equity:
+              type: array
+              nullable: true
+              items: { $ref: '#/components/schemas/FinancialInsight' }
+
 security:
   - CognitoJwt: []
 
@@ -281,7 +321,7 @@ paths:
 
   /v1/assets/{assetId}/metrics:
     get:
-      summary: Métricas calculadas (ROI, IRR, flujos, etc.)
+      summary: Métricas calculadas (ROI, IRR, flujos, etc.) e insights financieros por reglas
       parameters:
         - name: assetId
           in: path
@@ -293,7 +333,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AssetMetrics'
+                $ref: '#/components/schemas/AssetFinancialMetricsResponse'
 
   /v1/assets/{assetId}/cashflow:
     get:

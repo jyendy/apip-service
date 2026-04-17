@@ -3,6 +3,11 @@
 /** Registro global para listar tenants (admin plataforma). */
 export const pkPlatformRegistry = () => 'PLATFORM#REGISTRY'
 
+/** Catálogo global de reglas de insights financieros (motor decisional). */
+export const pkPlatformInsightRules = () => 'PLATFORM#INSIGHT_RULES'
+
+export const skInsightRule = (ruleId: string) => `INSIGHT_RULE#${ruleId}`
+
 export const skTenantRegistryEntry = (tenantId: string) => `TENANT#${tenantId}`
 
 export const pkTenant = (tenantId: string) => `TENANT#${tenantId}`
