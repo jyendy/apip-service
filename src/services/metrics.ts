@@ -255,6 +255,7 @@ export function computeAssetMetrics(
       JSON.stringify(irrSlotVsUi),
     )
   }
+  // TIR anual efectiva (%): Newton + bisección sobre flowsForIrr; ver `irrMonthlyPercent` en `financial/engine.ts`.
   const irr = nets.length ? irrMonthlyPercent(flowsForIrr) : 0
   const npv = nets.length ? npvFromMonthlyFlows(nets, 0.1) : 0
   const paybackPeriodMonths = nets.length
