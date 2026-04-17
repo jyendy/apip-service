@@ -82,6 +82,16 @@ components:
                 type: string
                 enum: [manual, tms, erp, import, api]
 
+    SimulationFinancingRequest:
+      type: object
+      required: [principal, annualInterestRate, termMonths, downPayment]
+      properties:
+        principal: { type: number, exclusiveMinimum: 0 }
+        annualInterestRate: { type: number, minimum: 0 }
+        termMonths: { type: integer, minimum: 1, maximum: 600 }
+        downPayment: { type: number, minimum: 0 }
+        firstPaymentMonthOffset: { type: integer, minimum: 0, maximum: 600 }
+
     SimulationRequest:
       type: object
       required: [assetType, initialCapital, expectedMonthlyRevenue, expectedOperatingCost, durationMonths]
@@ -95,6 +105,8 @@ components:
         growthRatePercent: { type: number }
         durationMonths: { type: integer, minimum: 1, maximum: 600 }
         discountRateAnnual: { type: number }
+        financing:
+          $ref: '#/components/schemas/SimulationFinancingRequest'
 
     MetricsCoverage:
       type: object

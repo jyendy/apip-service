@@ -19,6 +19,9 @@ export const skRevenueFact = (assetId: string, factId: string) => `ASSET#${asset
 
 export const skCostFact = (assetId: string, factId: string) => `ASSET#${assetId}#COST#${factId}`
 
+/** Un financiamiento por activo (MVP): un solo ítem bajo el tenant. */
+export const skAssetFinancing = (assetId: string) => `ASSET#${assetId}#FINANCING`
+
 export const skImportJob = (jobId: string) => `IMPORT#${jobId}`
 
 export const skSimulation = (simulationId: string) => `SIMULATION#${simulationId}`

@@ -64,6 +64,14 @@ export const listQuery = z.object({
   cursor: z.string().optional(),
 })
 
+export const simulationFinancingBody = z.object({
+  principal: z.number().positive(),
+  annualInterestRate: z.number().nonnegative(),
+  termMonths: z.number().int().positive().max(600),
+  downPayment: z.number().nonnegative(),
+  firstPaymentMonthOffset: z.number().int().min(0).max(600).optional(),
+})
+
 export const simulationBody = z.object({
   name: z.string().min(1).optional(),
   assetType: z.enum(['transport', 'real_estate', 'machinery', 'energy', 'other']),
@@ -73,9 +81,12 @@ export const simulationBody = z.object({
   growthRatePercent: z.number().optional(),
   durationMonths: z.number().int().positive().max(600),
   discountRateAnnual: z.number().optional(),
+  financing: simulationFinancingBody.optional(),
 })
 
-export const patchSimulationBody = simulationBody.partial()
+export const patchSimulationBody = simulationBody.partial().extend({
+  financing: z.union([simulationFinancingBody, z.null()]).optional(),
+})
 
 const importAssetRowSchema = z.object({
   portfolioId: z.string().min(1),
@@ -354,4 +365,14 @@ export const putAssetCashFlowsBody = z.object({
       }),
     )
     .min(1),
+})
+
+/** Crear/reemplazar el único financiamiento del activo (MVP). */
+export const putAssetFinancingBody = z.object({
+  principal: z.number().positive(),
+  annualInterestRate: z.number().min(0).max(100),
+  termMonths: z.number().int().min(1).max(600),
+  startDate: z.string().min(8),
+  amortizationType: z.literal('french'),
+  downPayment: z.number().min(0),
 })

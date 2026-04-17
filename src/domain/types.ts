@@ -166,6 +166,22 @@ export type ImportJob = {
   updatedAt: string
 }
 
+/** Financiamiento opcional guardado con una simulación (misma lógica que activo / francés). */
+export type SimulationFinancingStored = {
+  principal: number
+  annualInterestRate: number
+  termMonths: number
+  downPayment: number
+  firstPaymentMonthOffset?: number
+}
+
+export type SimulationEquityMetrics = {
+  projectedROI: number
+  projectedIRR: number
+  projectedNPV: number
+  breakEvenMonth: number
+}
+
 export type Simulation = {
   id: string
   tenantId: string
@@ -177,6 +193,8 @@ export type Simulation = {
   growthRatePercent?: number
   durationMonths: number
   discountRateAnnual?: number
+  financing?: SimulationFinancingStored | null
+  equityMetrics?: SimulationEquityMetrics | null
   projectedROI: number
   projectedIRR: number
   projectedNPV: number
@@ -211,6 +229,10 @@ export type CashFlowPoint = {
   cumulativeCashFlow: number
   /** Origen del mes respecto al motor híbrido. */
   mode: CashFlowPeriodMode
+  /** Cuota deuda (capital + interés); no es costo operativo. Solo vista equity / con financiamiento. */
+  debtService?: number
+  /** Flujo neto operativo (antes de deuda); en vista equity ayuda a comparar. */
+  operatingNetCashFlow?: number
 }
 
 export type MetricsDataMode = 'SIMULATION' | 'ACTUAL' | 'HYBRID'
@@ -219,6 +241,30 @@ export type MetricsCoverage = {
   actualMonths: number
   projectedMonths: number
   totalMonths: number
+}
+
+/** Financiamiento asociado a un activo (MVP: máximo uno). Tasas en puntos % anuales. */
+export type AssetFinancing = {
+  id: string
+  tenantId: string
+  assetId: string
+  principal: number
+  annualInterestRate: number
+  termMonths: number
+  startDate: string
+  amortizationType: 'french'
+  downPayment: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** Una fila del calendario de amortización (francés). `monthIndex` 1…n del préstamo. */
+export type AmortizationPayment = {
+  monthIndex: number
+  payment: number
+  principal: number
+  interest: number
+  remainingBalance: number
 }
 
 export type AssetMetricsComputed = {
@@ -239,6 +285,27 @@ export type AssetMetricsComputed = {
   dataMode: MetricsDataMode
   coverage: MetricsCoverage
   calculationVersion: string
+}
+
+/** Respuesta enriquecida de métricas por activo (vista activo vs equity). */
+export type AssetFinancialMetricsPackage = {
+  assetId: string
+  calculationVersion: string
+  metrics: {
+    asset: AssetMetricsComputed
+    equity: AssetMetricsComputed | null
+  }
+  financing: {
+    id: string
+    principal: number
+    annualInterestRate: number
+    termMonths: number
+    startDate: string
+    amortizationType: 'french'
+    downPayment: number
+    monthlyPayment: number
+    schedule: AmortizationPayment[]
+  } | null
 }
 
 /** TMS — orden de transporte (operacional; no métricas financieras). */

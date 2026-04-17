@@ -7,6 +7,7 @@ import {
 } from '@aws-sdk/lib-dynamodb'
 import type {
   Asset,
+  AssetFinancing,
   CostFact,
   ImportJob,
   Investor,
@@ -36,6 +37,7 @@ const ENTITY = {
   PORTFOLIO: 'PORTFOLIO',
   PROJECT: 'PROJECT',
   ASSET: 'ASSET',
+  FINANCING: 'FINANCING',
   REV_FACT: 'REV_FACT',
   COST_FACT: 'COST_FACT',
   IMPORT: 'IMPORT',
@@ -379,6 +381,57 @@ export async function deleteFactsForAsset(tenantId: string, assetId: string): Pr
       }),
     )
   }
+}
+
+function rowToFinancing(row: CoreItem): AssetFinancing {
+  return {
+    id: String(row.id),
+    tenantId: String(row.tenantId),
+    assetId: String(row.assetId),
+    principal: Number(row.principal),
+    annualInterestRate: Number(row.annualInterestRate),
+    termMonths: Number(row.termMonths),
+    startDate: String(row.startDate),
+    amortizationType: 'french',
+    downPayment: Number(row.downPayment),
+    createdAt: String(row.createdAt),
+    updatedAt: String(row.updatedAt),
+  }
+}
+
+export async function getFinancing(tenantId: string, assetId: string): Promise<AssetFinancing | null> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new GetCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skAssetFinancing(assetId) },
+    }),
+  )
+  if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.FINANCING) return null
+  return rowToFinancing(r.Item as CoreItem)
+}
+
+export async function putFinancing(f: AssetFinancing): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(f.tenantId, keys.skAssetFinancing(f.assetId), {
+        entityType: ENTITY.FINANCING,
+        ...f,
+      }),
+    }),
+  )
+}
+
+export async function deleteFinancingForAsset(tenantId: string, assetId: string): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new DeleteCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skAssetFinancing(assetId) },
+    }),
+  )
 }
 
 export async function putInvestor(inv: Investor): Promise<void> {

@@ -2,6 +2,8 @@ import { costCategoryToBucket } from '../domain/cost-categories'
 import type {
   Asset,
   AssetFinancialModel,
+  AssetFinancialMetricsPackage,
+  AssetFinancing,
   AssetMetricsComputed,
   CashFlowPoint,
   CostFact,
@@ -9,6 +11,7 @@ import type {
   MetricsDataMode,
   RevenueFact,
 } from '../domain/types'
+import { buildDebtServiceByMonth, financingPublicSnapshot, generateAmortizationSchedule } from './financing'
 import {
   CALCULATION_VERSION,
   estimatePaybackMonthsFromSeries,
@@ -289,5 +292,101 @@ export function computeAssetMetrics(
     dataMode,
     coverage,
     calculationVersion: CALCULATION_VERSION,
+  }
+}
+
+function financingStartOffsetMonths(acqYm: string, startIso: string): number {
+  const startYm = monthKey(startIso)
+  if (startYm < acqYm) return 0
+  return monthsBetweenYm(acqYm, startYm)
+}
+
+function buildDebtServiceByAssetMonth(totalMonths: number, offset: number, schedule: { payment: number }[]): number[] {
+  const debt = new Array<number>(totalMonths).fill(0)
+  for (let k = 0; k < schedule.length; k++) {
+    const i = offset + k
+    if (i >= 0 && i < totalMonths) debt[i] = schedule[k]!.payment
+  }
+  return debt
+}
+
+/**
+ * Métricas del activo (sin deuda) + métricas equity (apalancado) y snapshot de financiamiento.
+ * La vista `asset` coincide con `computeAssetMetrics`; la vista `equity` descuenta la cuota del préstamo (no mezclada con costos operativos).
+ */
+export function computeAssetFinancialPackage(
+  asset: Asset,
+  revenue: RevenueFact[],
+  costs: CostFact[],
+  financing: AssetFinancing | null,
+): AssetFinancialMetricsPackage {
+  const assetM = computeAssetMetrics(asset, revenue, costs)
+  if (!financing) {
+    return {
+      assetId: asset.id,
+      calculationVersion: assetM.calculationVersion,
+      metrics: { asset: assetM, equity: null },
+      financing: null,
+    }
+  }
+
+  const sumCap = financing.principal + financing.downPayment
+  if (Math.abs(sumCap - asset.initialInvestment) > 0.01 * Math.max(asset.initialInvestment, 1)) {
+    console.warn('[financing] principal + downPayment no coincide con initialInvestment del activo', {
+      assetId: asset.id,
+      principal: financing.principal,
+      downPayment: financing.downPayment,
+      initialInvestment: asset.initialInvestment,
+    })
+  }
+
+  const schedule = generateAmortizationSchedule(financing)
+  const acqYm = monthKey(asset.acquisitionDate)
+  const offset = financingStartOffsetMonths(acqYm, financing.startDate)
+  const debtByMonth = buildDebtServiceByMonth(assetM.cashFlow.length, offset, schedule)
+
+  const equityNets: number[] = []
+  const equityFlow: CashFlowPoint[] = []
+  let cumEq = 0
+  for (let i = 0; i < assetM.cashFlow.length; i++) {
+    const p = assetM.cashFlow[i]!
+    const d = debtByMonth[i] ?? 0
+    const opNet = p.netCashFlow
+    const eqNet = opNet - d
+    equityNets.push(eqNet)
+    cumEq += eqNet
+    equityFlow.push({
+      ...p,
+      operatingNetCashFlow: opNet,
+      debtService: d,
+      netCashFlow: eqNet,
+      cumulativeCashFlow: cumEq,
+    })
+  }
+
+  const equityNetProfit = equityNets.reduce((a, b) => a + b, 0)
+  const down = financing.downPayment
+  const roiEq = down > 0 ? simpleRoiPercent(equityNetProfit, down) : 0
+  const flowsEq = down > 0 ? [-down, ...equityNets] : []
+  const irrEq = equityNets.length && down > 0 ? irrMonthlyPercent(flowsEq) : 0
+  const npvEq = equityNets.length ? npvFromMonthlyFlows(equityNets, 0.1) : 0
+  const payEq = down > 0 && equityNets.length ? estimatePaybackMonthsFromSeries(equityNets, down) : 0
+
+  const equityM: AssetMetricsComputed = {
+    ...assetM,
+    initialInvestment: down,
+    netProfit: equityNetProfit,
+    roi: roiEq,
+    irr: irrEq,
+    npv: npvEq,
+    paybackPeriodMonths: payEq,
+    cashFlow: equityFlow,
+  }
+
+  return {
+    assetId: asset.id,
+    calculationVersion: assetM.calculationVersion,
+    metrics: { asset: assetM, equity: equityM },
+    financing: financingPublicSnapshot(financing, schedule),
   }
 }

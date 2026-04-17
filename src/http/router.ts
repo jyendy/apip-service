@@ -38,6 +38,7 @@ import {
   patchTransportOrderBody,
   patchTransportTripBody,
   putAssetCashFlowsBody,
+  putAssetFinancingBody,
   putProjectInvestorAllocationsBody,
   simulationBody,
   tmsTripCostBody,
@@ -49,14 +50,9 @@ import { auditedJsonError, finalizeAudit, finalizePlatformAudit } from '../lib/a
 import { json, noContent } from '../lib/http'
 import { newId } from '../lib/ids'
 import { publishDomainEvent } from '../lib/events'
-import {
-  buildMonthlyCashFlowSeries,
-  CALCULATION_VERSION,
-  irrMonthlyPercent,
-  npvFromMonthlyFlows,
-  simpleRoiPercent,
-} from '../financial/engine'
-import { computeAssetMetrics } from '../services/metrics'
+import { CALCULATION_VERSION } from '../financial/engine'
+import { computeAssetFinancialPackage, computeAssetMetrics } from '../services/metrics'
+import { computeSimulationProjection } from '../services/simulation-projection'
 import { buildStandardizedStructure } from '../services/structure'
 import { buildInsights } from '../services/insights'
 import {
@@ -108,35 +104,6 @@ function parseBody<T>(raw: string | undefined): T {
 
 function segments(path: string): string[] {
   return path.replace(/\/+$/, '').split('/').filter(Boolean)
-}
-
-function computeSimulationProjection(input: {
-  initialCapital: number
-  expectedMonthlyRevenue: number
-  expectedOperatingCost: number
-  growthRatePercent?: number
-  durationMonths: number
-  discountRateAnnual?: number
-}) {
-  const growthMonthly = (input.growthRatePercent ?? 0) / 100 / 12
-  const series = buildMonthlyCashFlowSeries({
-    months: input.durationMonths,
-    monthlyRevenue: input.expectedMonthlyRevenue,
-    monthlyCosts: input.expectedOperatingCost,
-    growthRateMonthly: growthMonthly,
-    initialInvestment: input.initialCapital,
-  })
-  const nets = series.map(s => s.net)
-  const flows = [-input.initialCapital, ...nets]
-  const irr = irrMonthlyPercent(flows)
-  const npv = npvFromMonthlyFlows(nets, input.discountRateAnnual ?? 0.1)
-  const totalProfit = nets.reduce((a, s) => a + s, 0)
-  const roi = simpleRoiPercent(totalProfit, input.initialCapital)
-  const breakEvenMonth = series.findIndex((_row, i) => {
-    const cum = series.slice(0, i + 1).reduce((x, y) => x + y.net, 0)
-    return cum >= input.initialCapital
-  })
-  return { roi, irr, npv, breakEvenMonth }
 }
 
 function validatePermissionKeys(keys: string[]): string | null {
@@ -337,12 +304,54 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const a = await repo.getAsset(ctx.tenantId, assetId)
         if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
         await repo.deleteFactsForAsset(ctx.tenantId, assetId)
+        await repo.deleteFinancingForAsset(ctx.tenantId, assetId)
         await repo.deleteAssetItem(ctx.tenantId, assetId)
         await publishDomainEvent(BUS, 'apip.service', {
           tenantId: ctx.tenantId,
           type: 'AssetDeleted',
           payload: { assetId },
         })
+        return finalizeAudit(ctx, event, noContent())
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'assets' && seg[3] === 'financing' && seg.length === 4) {
+      const assetId = seg[2]
+      if (method === 'GET') {
+        const a = await repo.getAsset(ctx.tenantId, assetId)
+        if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        const f = await repo.getFinancing(ctx.tenantId, assetId)
+        if (!f) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Sin financiamiento registrado')
+        return finalizeAudit(ctx, event, json(200, f))
+      }
+      if (method === 'PUT') {
+        const a = await repo.getAsset(ctx.tenantId, assetId)
+        if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        const body = putAssetFinancingBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const now = new Date().toISOString()
+        const existing = await repo.getFinancing(ctx.tenantId, assetId)
+        const id = existing?.id ?? randomUUID()
+        const row = {
+          id,
+          tenantId: ctx.tenantId,
+          assetId,
+          principal: body.data.principal,
+          annualInterestRate: body.data.annualInterestRate,
+          termMonths: body.data.termMonths,
+          startDate: new Date(body.data.startDate).toISOString(),
+          amortizationType: 'french' as const,
+          downPayment: body.data.downPayment,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+        }
+        await repo.putFinancing(row)
+        return finalizeAudit(ctx, event, json(200, row))
+      }
+      if (method === 'DELETE') {
+        const a = await repo.getAsset(ctx.tenantId, assetId)
+        if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        await repo.deleteFinancingForAsset(ctx.tenantId, assetId)
         return finalizeAudit(ctx, event, noContent())
       }
     }
@@ -354,8 +363,9 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
         const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
         const cost = await repo.listCostFacts(ctx.tenantId, assetId)
-        const metrics = computeAssetMetrics(a, rev, cost)
-        return finalizeAudit(ctx, event, json(200, metrics))
+        const fin = await repo.getFinancing(ctx.tenantId, assetId)
+        const pkg = computeAssetFinancialPackage(a, rev, cost, fin)
+        return finalizeAudit(ctx, event, json(200, pkg))
       }
     }
 
@@ -366,8 +376,9 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
         const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
         const cost = await repo.listCostFacts(ctx.tenantId, assetId)
-        const metrics = computeAssetMetrics(a, rev, cost)
-        return finalizeAudit(ctx, event, json(200, { assetId, cashFlow: metrics.cashFlow }))
+        const fin = await repo.getFinancing(ctx.tenantId, assetId)
+        const pkg = computeAssetFinancialPackage(a, rev, cost, fin)
+        return finalizeAudit(ctx, event, json(200, { assetId, cashFlow: pkg.metrics.asset.cashFlow }))
       }
     }
 
@@ -424,8 +435,9 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         }
         const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
         const cost = await repo.listCostFacts(ctx.tenantId, assetId)
-        const metrics = computeAssetMetrics(a, rev, cost)
-        return finalizeAudit(ctx, event, json(200, { assetId, updatedPeriods: body.data.periods.length, metrics }))
+        const fin = await repo.getFinancing(ctx.tenantId, assetId)
+        const pkg = computeAssetFinancialPackage(a, rev, cost, fin)
+        return finalizeAudit(ctx, event, json(200, { assetId, updatedPeriods: body.data.periods.length, ...pkg }))
       }
     }
 
@@ -1208,7 +1220,15 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const b = body.data
         const now = new Date().toISOString()
         const id = newId.simulation()
-        const projection = computeSimulationProjection(b)
+        const projection = computeSimulationProjection({
+          initialCapital: b.initialCapital,
+          expectedMonthlyRevenue: b.expectedMonthlyRevenue,
+          expectedOperatingCost: b.expectedOperatingCost,
+          growthRatePercent: b.growthRatePercent,
+          durationMonths: b.durationMonths,
+          discountRateAnnual: b.discountRateAnnual,
+          financing: b.financing ?? null,
+        })
         const simulation: Simulation = {
           id,
           tenantId: ctx.tenantId,
@@ -1220,6 +1240,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           growthRatePercent: b.growthRatePercent,
           durationMonths: b.durationMonths,
           discountRateAnnual: b.discountRateAnnual,
+          financing: b.financing ?? null,
+          equityMetrics: projection.equityMetrics,
           projectedROI: projection.roi,
           projectedIRR: projection.irr,
           projectedNPV: projection.npv,
@@ -1246,6 +1268,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const body = patchSimulationBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const merged = { ...sim, ...body.data }
+        const financing =
+          body.data.financing === undefined ? sim.financing : body.data.financing === null ? null : body.data.financing
         const projection = computeSimulationProjection({
           initialCapital: merged.initialCapital,
           expectedMonthlyRevenue: merged.expectedMonthlyRevenue,
@@ -1253,9 +1277,12 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           growthRatePercent: merged.growthRatePercent,
           durationMonths: merged.durationMonths,
           discountRateAnnual: merged.discountRateAnnual,
+          financing,
         })
         const updated: Simulation = {
           ...merged,
+          financing,
+          equityMetrics: projection.equityMetrics,
           projectedROI: projection.roi,
           projectedIRR: projection.irr,
           projectedNPV: projection.npv,
