@@ -437,7 +437,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const cost = await repo.listCostFacts(ctx.tenantId, assetId)
         const fin = await repo.getFinancing(ctx.tenantId, assetId)
         const pkg = computeAssetFinancialPackage(a, rev, cost, fin)
-        return finalizeAudit(ctx, event, json(200, { assetId, updatedPeriods: body.data.periods.length, ...pkg }))
+        return finalizeAudit(ctx, event, json(200, { ...pkg, updatedPeriods: body.data.periods.length }))
       }
     }
 

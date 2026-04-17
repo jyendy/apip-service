@@ -53,7 +53,7 @@ export function financingPublicSnapshot(f: AssetFinancing, schedule: Amortizatio
     annualInterestRate: f.annualInterestRate,
     termMonths: f.termMonths,
     startDate: f.startDate,
-    amortizationType: f.amortizationType as const,
+    amortizationType: f.amortizationType,
     downPayment: f.downPayment,
     monthlyPayment,
     schedule,
