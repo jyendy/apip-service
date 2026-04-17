@@ -36,8 +36,26 @@ export function simpleRoiPercent(netProfitApprox: number, initialInvestment: num
   return (netProfitApprox / initialInvestment) * 100
 }
 
-/** IRR mensual resuelto por búsqueda binaria sobre N flujos mensuales; el primero suele ser -CAPEX. */
+/** Activa logs de diagnóstico para `irrMonthlyPercent` (t0 + primeros valores del array). */
+function debugIrrCashFlowsEnabled(): boolean {
+  return process.env.APIP_DEBUG_IRR_CASHFLOWS === '1' || process.env.APIP_DEBUG_IRR_CASHFLOWS === 'true'
+}
+
+/**
+ * IRR mensual resuelto por búsqueda binaria sobre N flujos mensuales; el primero suele ser -CAPEX.
+ * Con `APIP_DEBUG_IRR_CASHFLOWS=1` imprime el array exacto recibido (t0 y primeros 5).
+ */
 export function irrMonthlyPercent(cashFlows: number[]): number {
+  if (debugIrrCashFlowsEnabled()) {
+    const t0 = cashFlows[0]
+    const first5 = cashFlows.slice(0, 5)
+    console.log(
+      '[APIP_DEBUG_IRR_CASHFLOWS] irrMonthlyPercent: exact cashFlows length=%d\nt0 (index 0)=%s\nfirst5=%s',
+      cashFlows.length,
+      JSON.stringify(t0),
+      JSON.stringify(first5),
+    )
+  }
   if (cashFlows.length === 0) return 0
   const npv = (r: number) =>
     cashFlows.reduce((acc, cf, t) => acc + cf / Math.pow(1 + r, t), 0)

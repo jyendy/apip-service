@@ -224,6 +224,37 @@ export function computeAssetMetrics(
 
   const roi = simpleRoiPercent(netProfit, asset.initialInvestment)
   const flowsForIrr = [-asset.initialInvestment, ...nets]
+  if (process.env.APIP_DEBUG_IRR_CASHFLOWS === '1' || process.env.APIP_DEBUG_IRR_CASHFLOWS === 'true') {
+    const eps = 1e-6
+    const n = Math.min(6, nets.length, cashFlow.length)
+    const seriesMatch = Array.from({ length: n }, (_, i) => {
+      const fromNet = nets[i]!
+      const fromPoint = cashFlow[i]!.netCashFlow
+      return {
+        monthIndex: i,
+        ym: cashFlow[i]!.date.slice(0, 7),
+        nets_i: fromNet,
+        cashFlow_i_netCashFlow: fromPoint,
+        delta: fromNet - fromPoint,
+        ok: Math.abs(fromNet - fromPoint) < eps,
+      }
+    })
+    const irrSlotVsUi = Array.from({ length: Math.min(4, nets.length) }, (_, i) => ({
+      uiTableRow: `cashFlow[${i}].netCashFlow`,
+      value: cashFlow[i]!.netCashFlow,
+      irrSeriesIndex: i + 1,
+      flowsForIrr_at_irrIndex: flowsForIrr[i + 1]!,
+      ok: Math.abs(cashFlow[i]!.netCashFlow - flowsForIrr[i + 1]!) < eps,
+    }))
+    console.log(
+      '[APIP_DEBUG_IRR_CASHFLOWS] computeAssetMetrics %s\nflowsForIrr[0] (t0 CAPEX)=%s\nflowsForIrr.slice(0,5)=%s\nnets vs cashFlow.net (primeros meses)=%s\nalineación UI vs entrada IRR (índice API t+1)=%s',
+      asset.id,
+      JSON.stringify(flowsForIrr[0]),
+      JSON.stringify(flowsForIrr.slice(0, 5)),
+      JSON.stringify(seriesMatch),
+      JSON.stringify(irrSlotVsUi),
+    )
+  }
   const irr = nets.length ? irrMonthlyPercent(flowsForIrr) : 0
   const npv = nets.length ? npvFromMonthlyFlows(nets, 0.1) : 0
   const paybackPeriodMonths = nets.length
