@@ -1,5 +1,6 @@
 import type { RequestContext } from './context'
 import type { RbacPermission, RbacRole, RbacState, UserAssignment } from '../domain/rbac'
+import { ROLE_PERMISSIONS } from '../domain/rbac'
 import type { PermissionKey } from '../domain/permission-keys'
 import { newId } from '../lib/ids'
 import * as accessRepo from '../repositories/access-repository'
@@ -25,6 +26,18 @@ const LEGACY_TO_RBAC: Partial<Record<PermissionKey, RbacPermission[]>> = {
 
 function uniq(perms: RbacPermission[]): RbacPermission[] {
   return [...new Set(perms)]
+}
+
+/**
+ * Si aún no hay perfil o no hay roles mapeados, se asume acceso completo al tenant
+ * (mismo comportamiento que antes del RBAC por ruta). Definir `rbacAssignments` o
+ * roles legacy con `permissionKeys` para restringir. Con `APIP_RBAC_STRICT=true` no se aplica.
+ */
+function bootstrapLegacyPermissions(): RbacPermission[] {
+  if (process.env.APIP_RBAC_STRICT === 'true') {
+    return []
+  }
+  return [...ROLE_PERMISSIONS.admin]
 }
 
 async function legacyPermissionsForProfile(
@@ -53,7 +66,7 @@ export async function loadRbacState(ctx: RequestContext): Promise<RbacState> {
   }
   const profile = await accessRepo.getTenantUserProfile(ctx.tenantId, sub)
   if (!profile) {
-    return { mode: 'legacy', legacyPermissions: [] }
+    return { mode: 'legacy', legacyPermissions: bootstrapLegacyPermissions() }
   }
 
   const raw = profile.rbacAssignments
@@ -67,6 +80,9 @@ export async function loadRbacState(ctx: RequestContext): Promise<RbacState> {
   }
 
   const legacy = await legacyPermissionsForProfile(ctx.tenantId, profile.roleIds ?? [])
+  if (legacy.length === 0) {
+    return { mode: 'legacy', legacyPermissions: bootstrapLegacyPermissions() }
+  }
   return { mode: 'legacy', legacyPermissions: legacy }
 }
 
