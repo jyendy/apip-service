@@ -376,3 +376,46 @@ export const putAssetFinancingBody = z.object({
   amortizationType: z.literal('french'),
   downPayment: z.number().min(0),
 })
+
+const documentEntityTypeSchema = z.enum([
+  'asset',
+  'property',
+  'lease',
+  'flip_project',
+  'due_diligence',
+])
+
+export const createDocumentBody = z.object({
+  entityType: documentEntityTypeSchema,
+  entityId: z.string().min(1),
+  name: z.string().min(1),
+  fileName: z.string().min(1),
+  mimeType: z.string().min(1),
+  size: z.number().positive(),
+  required: z.boolean(),
+  requirementId: z.string().optional(),
+  /** Obligatorio si la entidad no es un activo resuelto en servidor (p. ej. lease sin tabla propia). */
+  portfolioId: z.string().optional(),
+  projectId: z.string().optional(),
+})
+
+export const documentsListQuery = z.object({
+  entityType: documentEntityTypeSchema,
+  entityId: z.string().min(1),
+})
+
+export const rejectDocumentBody = z.object({
+  reason: z.string().max(2000).optional(),
+})
+
+export const createDocumentRequirementBody = z.object({
+  entityType: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  required: z.boolean(),
+  region: z.string().optional(),
+})
+
+export const documentRequirementsListQuery = z.object({
+  entityType: z.string().min(1),
+})

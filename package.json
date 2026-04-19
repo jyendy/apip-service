@@ -18,7 +18,9 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.700.0",
     "@aws-sdk/client-eventbridge": "^3.700.0",
+    "@aws-sdk/client-s3": "^3.1032.0",
     "@aws-sdk/lib-dynamodb": "^3.700.0",
+    "@aws-sdk/s3-request-presigner": "^3.1032.0",
     "jexl": "^2.3.0",
     "zod": "^3.23.8"
   },

@@ -28,4 +28,6 @@ export const newId = {
   tmsRoute: () => shortId('trte'),
   tmsRouteStop: () => shortId('tstop'),
   accessRole: () => shortId('role'),
+  document: () => shortId('doc'),
+  docRequirement: () => shortId('dreq'),
 }

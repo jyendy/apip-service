@@ -540,3 +540,47 @@ export type TenantUserProfile = {
   createdAt: string
   updatedAt: string
 }
+
+/** Entidad “objetivo” del documento (transversal: activos, arrendamientos, DD, etc.). */
+export type DocumentEntityType =
+  | 'asset'
+  | 'property'
+  | 'lease'
+  | 'flip_project'
+  | 'due_diligence'
+
+export type DocumentStatus = 'pending' | 'uploaded' | 'validated' | 'rejected'
+
+export type Document = {
+  id: string
+  tenantId: string
+  portfolioId: string
+  projectId: string
+  entityType: DocumentEntityType
+  entityId: string
+  name: string
+  fileName: string
+  mimeType: string
+  size: number
+  s3Key: string
+  status: DocumentStatus
+  required: boolean
+  requirementId?: string
+  uploadedAt?: string
+  validatedAt?: string
+  rejectedAt?: string
+  rejectReason?: string
+  createdAt: string
+}
+
+/** Plantilla de documento obligatorio/opcional por tipo de entidad. */
+export type DocumentRequirement = {
+  id: string
+  tenantId: string
+  entityType: string
+  name: string
+  description?: string
+  required: boolean
+  region?: string
+  createdAt: string
+}

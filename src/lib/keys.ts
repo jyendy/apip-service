@@ -74,3 +74,15 @@ export const gsi2pkAssetType = (tenantId: string, assetType: string) =>
   `TENANT#${tenantId}#TYPE#${assetType}`
 
 export const gsi2skAsset = (assetId: string) => gsi1skAsset(assetId)
+
+/** GSI3: listar documentos por entidad (tenant + tipo + id). */
+export const gsi3pkDocumentEntity = (tenantId: string, entityType: string, entityId: string) =>
+  `TENANT#${tenantId}#DOC_ENTITY#${entityType}#${entityId}`
+
+export const gsi3skDocument = (documentId: string) => `DOC#${documentId}`
+
+export const skDocument = (documentId: string) => `DOC#${documentId}`
+
+/** Plantillas de documentos requeridos por tipo de entidad. */
+export const skDocRequirement = (entityType: string, requirementId: string) =>
+  `DOCREQ#${entityType}#${requirementId}`
