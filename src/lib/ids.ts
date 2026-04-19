@@ -30,4 +30,5 @@ export const newId = {
   accessRole: () => shortId('role'),
   document: () => shortId('doc'),
   docRequirement: () => shortId('dreq'),
+  userAssignment: () => shortId('uas'),
 }

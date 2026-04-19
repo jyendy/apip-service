@@ -1,6 +1,8 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda'
 import { randomUUID } from 'crypto'
 import { resolvePlatformAdmin, resolveRequestContext } from '../auth/context'
+import { loadRbacState, normalizeRbacAssignmentsInput } from '../auth/rbac-state'
+import { requireRbac } from '../auth/require-rbac'
 import * as accessRepo from '../repositories/access-repository'
 import * as repo from '../repositories/core-repository'
 import {
@@ -25,6 +27,7 @@ import {
   investorLedgerEntryBody,
   listQuery,
   patchAccessRoleBody,
+  patchAccessUserBody,
   putSelfUserProfileBody,
   patchAssetBody,
   patchInvestorBody,
@@ -46,6 +49,7 @@ import {
 } from '../domain/schemas'
 import { COST_CATEGORY_CATALOG } from '../domain/cost-categories'
 import { PERMISSION_KEYS } from '../domain/permission-keys'
+import { effectivePermissionsPreview } from '../domain/rbac'
 import { auditedJsonError, finalizeAudit, finalizePlatformAudit } from '../lib/audit'
 import { json, noContent } from '../lib/http'
 import { newId } from '../lib/ids'
@@ -220,11 +224,18 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
   if (err) return err
 
   try {
+    const rbacState = await loadRbacState(ctx)
+
     // --- /v1/assets ---
     if (seg[0] === 'v1' && seg[1] === 'assets' && seg.length === 2) {
       if (method === 'GET') {
         const q = listQuery.safeParse(event.queryStringParameters ?? {})
         if (!q.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Query inválida', q.error.flatten())
+        const denied = requireRbac(ctx, event, rbacState, 'asset:read', {
+          portfolioId: q.data.portfolioId,
+          projectId: q.data.projectId,
+        })
+        if (denied) return denied
         const assets = await repo.listAssetsByTenant(ctx.tenantId, {
           projectId: q.data.projectId,
           portfolioId: q.data.portfolioId,
@@ -236,6 +247,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const body = createAssetBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const b = body.data
+        const deniedW = requireRbac(ctx, event, rbacState, 'asset:write', {
+          portfolioId: b.portfolioId,
+          projectId: b.projectId,
+        })
+        if (deniedW) return deniedW
         const pf = await repo.getPortfolio(ctx.tenantId, b.portfolioId)
         if (!pf) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'portfolioId no existe')
         const pj = await repo.getProject(ctx.tenantId, b.projectId)
@@ -274,11 +290,21 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'GET') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
         if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        const denied = requireRbac(ctx, event, rbacState, 'asset:read', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (denied) return denied
         return finalizeAudit(ctx, event, json(200, a))
       }
       if (method === 'PATCH') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
         if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        const deniedW = requireRbac(ctx, event, rbacState, 'asset:write', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedW) return deniedW
         const body = patchAssetBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const touchesStructuralFields =
@@ -309,6 +335,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'DELETE') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
         if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        const deniedW = requireRbac(ctx, event, rbacState, 'asset:write', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedW) return deniedW
         await repo.deleteFactsForAsset(ctx.tenantId, assetId)
         await repo.deleteFinancingForAsset(ctx.tenantId, assetId)
         await repo.deleteAssetItem(ctx.tenantId, assetId)
@@ -326,6 +357,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'GET') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
         if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        const deniedF = requireRbac(ctx, event, rbacState, 'financial:read', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedF) return deniedF
         const f = await repo.getFinancing(ctx.tenantId, assetId)
         if (!f) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Sin financiamiento registrado')
         return finalizeAudit(ctx, event, json(200, f))
@@ -333,6 +369,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'PUT') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
         if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        const deniedW = requireRbac(ctx, event, rbacState, 'asset:write', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedW) return deniedW
         const body = putAssetFinancingBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
@@ -357,6 +398,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'DELETE') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
         if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        const deniedW = requireRbac(ctx, event, rbacState, 'asset:write', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedW) return deniedW
         await repo.deleteFinancingForAsset(ctx.tenantId, assetId)
         return finalizeAudit(ctx, event, noContent())
       }
@@ -367,6 +413,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'GET') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
         if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        const deniedF = requireRbac(ctx, event, rbacState, 'financial:read', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedF) return deniedF
         const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
         const cost = await repo.listCostFacts(ctx.tenantId, assetId)
         const fin = await repo.getFinancing(ctx.tenantId, assetId)
@@ -393,6 +444,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'GET') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
         if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        const deniedF = requireRbac(ctx, event, rbacState, 'financial:read', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedF) return deniedF
         const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
         const cost = await repo.listCostFacts(ctx.tenantId, assetId)
         const fin = await repo.getFinancing(ctx.tenantId, assetId)
@@ -406,6 +462,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'GET') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
         if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        const deniedF = requireRbac(ctx, event, rbacState, 'financial:read', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedF) return deniedF
         const revenueFacts = await repo.listRevenueFacts(ctx.tenantId, assetId)
         const costFacts = await repo.listCostFacts(ctx.tenantId, assetId)
         return finalizeAudit(ctx, event, json(200, { assetId, revenueFacts, costFacts }))
@@ -417,6 +478,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'PUT') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
         if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        const deniedW = requireRbac(ctx, event, rbacState, 'asset:write', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedW) return deniedW
         const body = putAssetCashFlowsBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
@@ -465,6 +531,11 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'GET') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
         if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        const deniedF = requireRbac(ctx, event, rbacState, 'financial:read', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedF) return deniedF
         const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
         const cost = await repo.listCostFacts(ctx.tenantId, assetId)
         const metrics = computeAssetMetrics(a, rev, cost)
@@ -480,6 +551,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
+        const denied = requireRbac(ctx, event, rbacState, 'user:manage', {})
+        if (denied) return denied
         const body = createAccessRoleBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const permErr = validatePermissionKeys(body.data.permissionKeys)
@@ -502,11 +575,15 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'access' && seg[2] === 'roles' && seg[3] && seg.length === 4) {
       const roleId = seg[3]
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'user:manage', {})
+        if (denied) return denied
         const role = await accessRepo.getAccessRole(ctx.tenantId, roleId)
         if (!role) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Rol no encontrado')
         return finalizeAudit(ctx, event, json(200, role))
       }
       if (method === 'PATCH') {
+        const denied = requireRbac(ctx, event, rbacState, 'user:manage', {})
+        if (denied) return denied
         const existing = await accessRepo.getAccessRole(ctx.tenantId, roleId)
         if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Rol no encontrado')
         const body = patchAccessRoleBody.safeParse(parseBody(event.body))
@@ -525,6 +602,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         return finalizeAudit(ctx, event, json(200, updated))
       }
       if (method === 'DELETE') {
+        const denied = requireRbac(ctx, event, rbacState, 'user:manage', {})
+        if (denied) return denied
         const existing = await accessRepo.getAccessRole(ctx.tenantId, roleId)
         if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Rol no encontrado')
         await accessRepo.deleteAccessRole(ctx.tenantId, roleId)
@@ -534,8 +613,35 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
 
     if (seg[0] === 'v1' && seg[1] === 'access' && seg[2] === 'users' && seg.length === 3) {
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'user:manage', {})
+        if (denied) return denied
         const items = await accessRepo.listTenantUserProfiles(ctx.tenantId)
         return finalizeAudit(ctx, event, json(200, { items }))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'access' && seg[2] === 'users' && seg[3] && seg.length === 4) {
+      const targetSub = seg[3]
+      if (method === 'PATCH') {
+        const denied = requireRbac(ctx, event, rbacState, 'user:manage', {})
+        if (denied) return denied
+        const body = patchAccessUserBody.safeParse(parseBody(event.body))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const existing = await accessRepo.getTenantUserProfile(ctx.tenantId, targetSub)
+        if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Usuario no encontrado en este tenant')
+        const now = new Date().toISOString()
+        const rbacAssignments =
+          body.data.rbacAssignments !== undefined
+            ? normalizeRbacAssignmentsInput(ctx.tenantId, targetSub, body.data.rbacAssignments)
+            : existing.rbacAssignments
+        const updated: TenantUserProfile = {
+          ...existing,
+          ...body.data,
+          rbacAssignments,
+          updatedAt: now,
+        }
+        await accessRepo.putTenantUserProfile(updated)
+        return finalizeAudit(ctx, event, json(200, updated))
       }
     }
 
@@ -545,7 +651,17 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'GET') {
         const p = await accessRepo.getTenantUserProfile(ctx.tenantId, sub)
         if (!p) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Perfil no registrado; use PUT para crearlo')
-        return finalizeAudit(ctx, event, json(200, p))
+        return finalizeAudit(
+          ctx,
+          event,
+          json(200, {
+            ...p,
+            rbac: {
+              mode: rbacState.mode,
+              effectivePermissions: effectivePermissionsPreview(rbacState),
+            },
+          }),
+        )
       }
       if (method === 'PUT') {
         const body = putSelfUserProfileBody.safeParse(parseBody(event.body))
@@ -574,10 +690,14 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     // --- portfolios ---
     if (seg[0] === 'v1' && seg[1] === 'portfolios' && seg.length === 2) {
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'asset:read', {})
+        if (denied) return denied
         const items = await repo.listPortfolios(ctx.tenantId)
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
+        const denied = requireRbac(ctx, event, rbacState, 'asset:write', {})
+        if (denied) return denied
         const body = createPortfolioBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
@@ -598,11 +718,15 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'portfolios' && seg[2] && seg.length === 3) {
       const id = seg[2]
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'asset:read', { portfolioId: id })
+        if (denied) return denied
         const p = await repo.getPortfolio(ctx.tenantId, id)
         if (!p) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Portfolio no encontrado')
         return finalizeAudit(ctx, event, json(200, p))
       }
       if (method === 'PATCH') {
+        const denied = requireRbac(ctx, event, rbacState, 'asset:write', { portfolioId: id })
+        if (denied) return denied
         const p = await repo.getPortfolio(ctx.tenantId, id)
         if (!p) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Portfolio no encontrado')
         const body = patchPortfolioBody.safeParse(parseBody(event.body))
@@ -622,6 +746,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'portfolios' && seg[3] === 'metrics' && seg.length === 4) {
       const portfolioId = seg[2]
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', { portfolioId })
+        if (denied) return denied
         const a = await repo.listAssetsByTenant(ctx.tenantId, { portfolioId })
         const metricsList = []
         for (const asset of a) {
@@ -636,6 +762,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'portfolios' && seg[3] === 'cashflow' && seg.length === 4) {
       const portfolioId = seg[2]
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', { portfolioId })
+        if (denied) return denied
         const a = await repo.listAssetsByTenant(ctx.tenantId, { portfolioId })
         const series = []
         for (const asset of a) {
@@ -651,6 +779,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'portfolios' && seg[3] === 'performance' && seg.length === 4) {
       const portfolioId = seg[2]
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', { portfolioId })
+        if (denied) return denied
         const a = await repo.listAssetsByTenant(ctx.tenantId, { portfolioId })
         const totalCap = a.reduce((s, x) => s + x.initialInvestment, 0)
         let weightedRoi = 0
@@ -668,6 +798,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'portfolios' && seg[3] === 'capital-participation' && seg.length === 4) {
       const portfolioId = seg[2]
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', { portfolioId })
+        if (denied) return denied
         const view = await buildPortfolioCapitalParticipation(ctx.tenantId, portfolioId)
         if (!view) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Portfolio no encontrado')
         return finalizeAudit(ctx, event, json(200, view))
@@ -678,12 +810,16 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'projects' && seg.length === 2) {
       if (method === 'GET') {
         const q = event.queryStringParameters?.portfolioId
+        const denied = requireRbac(ctx, event, rbacState, 'asset:read', { portfolioId: q })
+        if (denied) return denied
         const items = await repo.listProjects(ctx.tenantId, q)
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
         const body = createProjectBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const denied = requireRbac(ctx, event, rbacState, 'asset:write', { portfolioId: body.data.portfolioId })
+        if (denied) return denied
         const pf = await repo.getPortfolio(ctx.tenantId, body.data.portfolioId)
         if (!pf) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'portfolioId no existe')
         const now = new Date().toISOString()
@@ -710,11 +846,21 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'GET') {
         const p = await repo.getProject(ctx.tenantId, id)
         if (!p) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proyecto no encontrado')
+        const denied = requireRbac(ctx, event, rbacState, 'asset:read', {
+          portfolioId: p.portfolioId,
+          projectId: id,
+        })
+        if (denied) return denied
         return finalizeAudit(ctx, event, json(200, p))
       }
       if (method === 'PATCH') {
         const p = await repo.getProject(ctx.tenantId, id)
         if (!p) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proyecto no encontrado')
+        const denied = requireRbac(ctx, event, rbacState, 'asset:write', {
+          portfolioId: p.portfolioId,
+          projectId: id,
+        })
+        if (denied) return denied
         const body = patchProjectBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
@@ -731,6 +877,13 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'projects' && seg[3] === 'metrics' && seg.length === 4) {
       const projectId = seg[2]
       if (method === 'GET') {
+        const pj = await repo.getProject(ctx.tenantId, projectId)
+        if (!pj) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proyecto no encontrado')
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', {
+          portfolioId: pj.portfolioId,
+          projectId,
+        })
+        if (denied) return denied
         const a = await repo.listAssetsByTenant(ctx.tenantId, { projectId })
         const metricsList = []
         for (const asset of a) {
@@ -745,6 +898,13 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'projects' && seg[3] === 'cashflow' && seg.length === 4) {
       const projectId = seg[2]
       if (method === 'GET') {
+        const pj = await repo.getProject(ctx.tenantId, projectId)
+        if (!pj) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proyecto no encontrado')
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', {
+          portfolioId: pj.portfolioId,
+          projectId,
+        })
+        if (denied) return denied
         const a = await repo.listAssetsByTenant(ctx.tenantId, { projectId })
         const series = []
         for (const asset of a) {
@@ -760,6 +920,13 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'projects' && seg[3] === 'investor-allocations' && seg.length === 4) {
       const projectId = seg[2]
       if (method === 'PUT') {
+        const pj = await repo.getProject(ctx.tenantId, projectId)
+        if (!pj) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proyecto no encontrado')
+        const denied = requireRbac(ctx, event, rbacState, 'user:manage', {
+          portfolioId: pj.portfolioId,
+          projectId,
+        })
+        if (denied) return denied
         const body = putProjectInvestorAllocationsBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         try {
@@ -784,6 +951,13 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'projects' && seg[3] === 'capital-participation' && seg.length === 4) {
       const projectId = seg[2]
       if (method === 'GET') {
+        const pj = await repo.getProject(ctx.tenantId, projectId)
+        if (!pj) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proyecto no encontrado')
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', {
+          portfolioId: pj.portfolioId,
+          projectId,
+        })
+        if (denied) return denied
         const view = await buildProjectCapitalParticipation(ctx.tenantId, projectId)
         if (!view) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proyecto no encontrado')
         return finalizeAudit(ctx, event, json(200, view))
@@ -793,6 +967,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     // --- dashboard / insights ---
     if (seg[0] === 'v1' && seg[1] === 'dashboard' && seg[2] === 'executive' && seg.length === 3) {
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', {})
+        if (denied) return denied
         const assets = await repo.listAssetsByTenant(ctx.tenantId, {})
         const totalCap = assets.reduce((s, x) => s + x.initialInvestment, 0)
         let totalRev = 0
@@ -851,6 +1027,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
 
     if (seg[0] === 'v1' && seg[1] === 'insights' && seg.length === 2) {
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:analyze', {})
+        if (denied) return denied
         const assets = await repo.listAssetsByTenant(ctx.tenantId, {})
         const enriched = []
         for (const asset of assets) {
@@ -867,6 +1045,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'reports' && seg.length === 3) {
       const kind = seg[2]
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', {})
+        if (denied) return denied
         if (kind === 'investment-summary') {
           const rep = await buildInvestmentSummaryReport(ctx.tenantId)
           return finalizeAudit(ctx, event, json(200, rep))
@@ -885,10 +1065,14 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     // --- investors ---
     if (seg[0] === 'v1' && seg[1] === 'investors' && seg.length === 2) {
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', {})
+        if (denied) return denied
         const items = await repo.listInvestors(ctx.tenantId)
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
+        const denied = requireRbac(ctx, event, rbacState, 'user:manage', {})
+        if (denied) return denied
         const body = createInvestorBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
@@ -912,11 +1096,15 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'investors' && seg[2] && seg.length === 3) {
       const investorId = seg[2]
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', {})
+        if (denied) return denied
         const inv = await repo.getInvestor(ctx.tenantId, investorId)
         if (!inv) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Inversionista no encontrado')
         return finalizeAudit(ctx, event, json(200, inv))
       }
       if (method === 'PATCH') {
+        const denied = requireRbac(ctx, event, rbacState, 'user:manage', {})
+        if (denied) return denied
         const existing = await repo.getInvestor(ctx.tenantId, investorId)
         if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Inversionista no encontrado')
         const body = patchInvestorBody.safeParse(parseBody(event.body))
@@ -927,6 +1115,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         return finalizeAudit(ctx, event, json(200, updated))
       }
       if (method === 'DELETE') {
+        const denied = requireRbac(ctx, event, rbacState, 'user:manage', {})
+        if (denied) return denied
         const existing = await repo.getInvestor(ctx.tenantId, investorId)
         if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Inversionista no encontrado')
         await repo.deleteInvestor(ctx.tenantId, investorId)
@@ -937,11 +1127,15 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'investors' && seg[2] && seg[3] === 'ledger' && seg.length === 4) {
       const investorId = seg[2]
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', {})
+        if (denied) return denied
         const entries = await repo.listInvestorLedgerEntries(ctx.tenantId, investorId)
         const items = [...entries].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
+        const denied = requireRbac(ctx, event, rbacState, 'user:manage', {})
+        if (denied) return denied
         const inv = await repo.getInvestor(ctx.tenantId, investorId)
         if (!inv) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Inversionista no encontrado')
         const body = investorLedgerEntryBody.safeParse(parseBody(event.body))
@@ -965,6 +1159,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'investors' && seg[2] && seg[3] === 'capital-account' && seg.length === 4) {
       const investorId = seg[2]
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', {})
+        if (denied) return denied
         const inv = await repo.getInvestor(ctx.tenantId, investorId)
         if (!inv) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Inversionista no encontrado')
         const acc = await buildInvestorCapitalAccount(ctx.tenantId, inv)
@@ -975,6 +1171,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'investors' && seg[2] && seg[3] === 'exposure' && seg.length === 4) {
       const investorId = seg[2]
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', {})
+        if (denied) return denied
         const inv = await repo.getInvestor(ctx.tenantId, investorId)
         if (!inv) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Inversionista no encontrado')
         const exp = await buildInvestorExposure(ctx.tenantId, inv)
@@ -985,6 +1183,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     // --- imports ---
     if (seg[0] === 'v1' && seg[1] === 'imports' && seg[2] === 'assets' && seg.length === 3) {
       if (method === 'POST') {
+        const denied = requireRbac(ctx, event, rbacState, 'operation:write', {})
+        if (denied) return denied
         const body = importAssetsBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const b = body.data
@@ -1078,6 +1278,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'imports' && seg[2] === 'assets' && seg[3] && seg.length === 4) {
       const jobId = seg[3]
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'operation:write', {})
+        if (denied) return denied
         const j = await repo.getImportJob(ctx.tenantId, jobId)
         if (!j) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Job no encontrado')
         return finalizeAudit(ctx, event, json(200, j))
@@ -1086,6 +1288,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
 
     if (seg[0] === 'v1' && seg[1] === 'imports' && seg[2] === 'tms-rates' && seg.length === 3) {
       if (method === 'POST') {
+        const denied = requireRbac(ctx, event, rbacState, 'operation:write', {})
+        if (denied) return denied
         const body = importTmsRatesBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         if (!body.data.rows || body.data.rows.length === 0) {
@@ -1133,6 +1337,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
 
     if (seg[0] === 'v1' && seg[1] === 'imports' && seg[2] === 'tms-order-trips' && seg.length === 3) {
       if (method === 'POST') {
+        const denied = requireRbac(ctx, event, rbacState, 'operation:write', {})
+        if (denied) return denied
         const body = importTmsOrderTripsBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         if (!body.data.rows || body.data.rows.length === 0) {
@@ -1230,10 +1436,14 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     // --- simulations ---
     if (seg[0] === 'v1' && seg[1] === 'simulations' && seg.length === 2) {
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', {})
+        if (denied) return denied
         const items = await repo.listSimulations(ctx.tenantId)
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:analyze', {})
+        if (denied) return denied
         const body = simulationBody.safeParse(parseBody(event.body))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const b = body.data
@@ -1277,11 +1487,15 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     if (seg[0] === 'v1' && seg[1] === 'simulations' && seg[2] && seg.length === 3) {
       const simulationId = seg[2]
       if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', {})
+        if (denied) return denied
         const sim = await repo.getSimulation(ctx.tenantId, simulationId)
         if (!sim) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Simulación no encontrada')
         return finalizeAudit(ctx, event, json(200, sim))
       }
       if (method === 'PATCH') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:analyze', {})
+        if (denied) return denied
         const sim = await repo.getSimulation(ctx.tenantId, simulationId)
         if (!sim) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Simulación no encontrada')
         const body = patchSimulationBody.safeParse(parseBody(event.body))
@@ -1313,6 +1527,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         return finalizeAudit(ctx, event, json(200, updated))
       }
       if (method === 'DELETE') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:analyze', {})
+        if (denied) return denied
         const sim = await repo.getSimulation(ctx.tenantId, simulationId)
         if (!sim) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Simulación no encontrada')
         await repo.deleteSimulation(ctx.tenantId, simulationId)
@@ -1321,6 +1537,12 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
     }
 
     // --- TMS (operacional → RevenueFact / CostFact; sin métricas en TMS) ---
+    if (seg[0] === 'v1' && seg[1] === 'tms') {
+      const isWrite = ['POST', 'PATCH', 'DELETE', 'PUT'].includes(method)
+      const deniedTms = requireRbac(ctx, event, rbacState, isWrite ? 'operation:write' : 'asset:read', {})
+      if (deniedTms) return deniedTms
+    }
+
     if (seg[0] === 'v1' && seg[1] === 'tms' && seg[2] === 'cost-categories' && seg.length === 3) {
       if (method === 'GET') {
         return finalizeAudit(ctx, event, json(200, { items: COST_CATEGORY_CATALOG }))
@@ -2015,7 +2237,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       }
     }
 
-    const docRoute = await tryRouteDocuments(ctx, event, method, seg)
+    const docRoute = await tryRouteDocuments(ctx, event, method, seg, rbacState)
     if (docRoute) return docRoute
 
     // --- alerts ---

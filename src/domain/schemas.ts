@@ -402,6 +402,30 @@ export const createDocumentBody = z.object({
 export const documentsListQuery = z.object({
   entityType: documentEntityTypeSchema,
   entityId: z.string().min(1),
+  /** Obligatorio para entityType distinto de asset/property (alcance RBAC). */
+  portfolioId: z.string().optional(),
+  projectId: z.string().optional(),
+})
+
+const rbacRoleSchema = z.enum(['admin', 'investor', 'operator', 'analyst', 'auditor'])
+
+export const rbacAssignmentInput = z.object({
+  id: z.string().min(1).optional(),
+  userId: z.string().optional(),
+  tenantId: z.string().optional(),
+  role: rbacRoleSchema,
+  portfolioId: z.string().optional(),
+  projectId: z.string().optional(),
+  createdAt: z.string().optional(),
+})
+
+export const patchAccessUserBody = z.object({
+  email: z.string().email().optional(),
+  displayName: z.string().min(1).optional(),
+  photoUrl: z.string().url().optional(),
+  preferences: z.record(z.string(), z.unknown()).optional(),
+  roleIds: z.array(z.string().min(1)).optional(),
+  rbacAssignments: z.array(rbacAssignmentInput).optional(),
 })
 
 export const rejectDocumentBody = z.object({

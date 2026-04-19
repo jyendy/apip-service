@@ -1,5 +1,7 @@
 /** Entidades de dominio APIP (alineadas al prompt consolidado). */
 
+import type { UserAssignment } from './rbac'
+
 export type TenantType = 'fund' | 'company' | 'family_office' | 'other'
 
 export type Tenant = {
@@ -535,8 +537,10 @@ export type TenantUserProfile = {
   displayName?: string
   photoUrl?: string
   preferences?: Record<string, unknown>
-  /** IDs de roles definidos en `AccessRole` para este tenant. */
+  /** IDs de roles definidos en `AccessRole` para este tenant (catálogo legacy). */
   roleIds: string[]
+  /** Asignaciones RBAC (rol fijo + alcance). Si hay entradas, tienen prioridad sobre `roleIds` para autorización. */
+  rbacAssignments?: UserAssignment[]
   createdAt: string
   updatedAt: string
 }
