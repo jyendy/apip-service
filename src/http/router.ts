@@ -182,6 +182,90 @@ async function routeAdmin(
       return finalizePlatformAudit(event, adminCtx.subject, json(200, t))
     }
   }
+
+  // /v1/admin/tenants/{tenantId}/access/users — gestión de perfiles/RBAC por tenant (admin plataforma).
+  if (seg[2] === 'tenants' && seg[3] && seg[4] === 'access' && seg[5] === 'users') {
+    const tenantId = seg[3]
+    const tenantErr = await ensureTenant(adminCtx, event, tenantId)
+    if (tenantErr) return tenantErr
+
+    if (seg.length === 6 && method === 'GET') {
+      const items = await accessRepo.listTenantUserProfiles(tenantId)
+      return finalizePlatformAudit(event, adminCtx.subject, json(200, { items }))
+    }
+
+    if (seg.length === 7 && seg[6]) {
+      const targetSub = seg[6]
+      if (method === 'PATCH') {
+        const body = patchAccessUserBody.safeParse(parseBody(event.body))
+        if (!body.success)
+          return auditedJsonError(adminCtx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const existing = await accessRepo.getTenantUserProfile(tenantId, targetSub)
+        if (!existing) return auditedJsonError(adminCtx, event, 404, 'NOT_FOUND', 'Usuario no encontrado en este tenant')
+        const now = new Date().toISOString()
+        const rbacAssignments =
+          body.data.rbacAssignments !== undefined
+            ? normalizeRbacAssignmentsInput(tenantId, targetSub, body.data.rbacAssignments)
+            : existing.rbacAssignments
+        const updated: TenantUserProfile = {
+          ...existing,
+          ...body.data,
+          rbacAssignments,
+          updatedAt: now,
+        }
+        await accessRepo.putTenantUserProfile(updated)
+        return finalizePlatformAudit(event, adminCtx.subject, json(200, updated))
+      }
+      if (method === 'PUT') {
+        const body = patchAccessUserBody.safeParse(parseBody(event.body))
+        if (!body.success)
+          return auditedJsonError(adminCtx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const existing = await accessRepo.getTenantUserProfile(tenantId, targetSub)
+        const now = new Date().toISOString()
+        if (!existing) {
+          if (!body.data.email)
+            return auditedJsonError(
+              adminCtx,
+              event,
+              400,
+              'VALIDATION',
+              'Para crear un perfil en este tenant se requiere email en el cuerpo',
+            )
+          const rbacAssignments =
+            body.data.rbacAssignments !== undefined
+              ? normalizeRbacAssignmentsInput(tenantId, targetSub, body.data.rbacAssignments)
+              : []
+          const created: TenantUserProfile = {
+            tenantId,
+            cognitoSub: targetSub,
+            email: body.data.email,
+            displayName: body.data.displayName,
+            photoUrl: body.data.photoUrl,
+            preferences: body.data.preferences,
+            roleIds: body.data.roleIds ?? [],
+            rbacAssignments,
+            createdAt: now,
+            updatedAt: now,
+          }
+          await accessRepo.putTenantUserProfile(created)
+          return finalizePlatformAudit(event, adminCtx.subject, json(201, created))
+        }
+        const rbacAssignments =
+          body.data.rbacAssignments !== undefined
+            ? normalizeRbacAssignmentsInput(tenantId, targetSub, body.data.rbacAssignments)
+            : existing.rbacAssignments
+        const updated: TenantUserProfile = {
+          ...existing,
+          ...body.data,
+          rbacAssignments,
+          updatedAt: now,
+        }
+        await accessRepo.putTenantUserProfile(updated)
+        return finalizePlatformAudit(event, adminCtx.subject, json(200, updated))
+      }
+    }
+  }
+
   return auditedJsonError(adminCtx, event, 404, 'NOT_FOUND', `Ruta admin no implementada: ${method}`)
 }
 

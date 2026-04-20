@@ -703,6 +703,30 @@ Resources:
       AuthorizationType: JWT
       AuthorizerId: !Ref ApipJwtAuthorizer
       Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1AdminTenantsIdAccessUsers:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/admin/tenants/{tenantId}/access/users
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePatchV1AdminTenantsIdAccessUsersCognitoSub:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: PATCH /v1/admin/tenants/{tenantId}/access/users/{cognitoSub}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePutV1AdminTenantsIdAccessUsersCognitoSub:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: PUT /v1/admin/tenants/{tenantId}/access/users/{cognitoSub}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
 
   # TMS (operacional → CostFact / RevenueFact; rutas explícitas en gateway).
   ApipJwtRouteGetV1TmsCostCategories:
