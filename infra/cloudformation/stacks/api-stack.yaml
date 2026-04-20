@@ -23,6 +23,12 @@ Parameters:
     Type: String
     Default: ''
     Description: S3 bucket for documents (pre-signed PUT/GET). Dejar vacío hasta crear el bucket.
+  PlatformAdminGroupNames:
+    Type: String
+    Default: 'apip-platform-admin,admin'
+    Description: >-
+      Grupo(s) Cognito con acceso a /v1/admin/*. Varios nombres separados por coma. En producción suele bastar
+      apip-platform-admin; incluir admin si el pool usa ese nombre para superusuarios.
 
 Conditions:
   HasApiCustomDomainName: !Not [!Equals [!Ref ApiCustomDomainName, '']]
@@ -53,7 +59,7 @@ Resources:
             Fn::ImportValue: apip-user-profiles-table-name
           EVENT_BUS_NAME: default
           ALLOW_DEV_TENANT_HEADER: 'false'
-          PLATFORM_ADMIN_GROUP: apip-platform-admin
+          PLATFORM_ADMIN_GROUP: !Ref PlatformAdminGroupNames
           APIP_DOCUMENTS_BUCKET_NAME: !Ref DocumentsBucketName
       Code:
         S3Bucket: !Ref LambdaCodeBucket

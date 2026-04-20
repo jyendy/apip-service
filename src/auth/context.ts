@@ -16,19 +16,28 @@ export function getJwtClaims(event: APIGatewayProxyEventV2): Record<string, stri
   return jwt?.claims as Record<string, string> | undefined
 }
 
+/** Nombres de grupos Cognito que otorgan acceso a `/v1/admin/*` (lista separada por comas en `PLATFORM_ADMIN_GROUP`). */
+function configuredPlatformAdminGroups(): string[] {
+  const raw = process.env.PLATFORM_ADMIN_GROUP ?? 'apip-platform-admin,admin'
+  return raw
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+}
+
 /**
  * Usuario con permiso para /v1/admin/* (grupo Cognito o claim).
- * Configurar grupo en Cognito y `PLATFORM_ADMIN_GROUP` en Lambda (default: apip-platform-admin).
+ * Variable `PLATFORM_ADMIN_GROUP`: uno o varios nombres de grupo separados por comas (p. ej. `apip-platform-admin,admin`).
  */
 export function resolvePlatformAdmin(event: APIGatewayProxyEventV2): { subject: string } | null {
   const claims = getJwtClaims(event)
   if (!claims?.sub) return null
-  const groupName = process.env.PLATFORM_ADMIN_GROUP ?? 'apip-platform-admin'
   const raw = claims['cognito:groups']
   const groups = raw
     ? raw.split(',').map(s => s.trim()).filter(Boolean)
     : []
-  if (groups.includes(groupName)) return { subject: claims.sub }
+  const allowed = configuredPlatformAdminGroups()
+  if (allowed.some(g => groups.includes(g))) return { subject: claims.sub }
   if (claims['custom:platformAdmin'] === 'true') return { subject: claims.sub }
   return null
 }

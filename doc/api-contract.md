@@ -12,7 +12,7 @@ Este documento define el contrato REST de **apip-service**: multi-tenant por **J
 
 Rutas bajo `/v1/admin/*` requieren el **mismo JWT**, pero el usuario debe ser administrador de plataforma:
 
-- Grupo Cognito cuyo nombre coincide con la variable de entorno Lambda **`PLATFORM_ADMIN_GROUP`** (por defecto `apip-platform-admin`), **o**
+- Grupo Cognito cuyo nombre está en **`PLATFORM_ADMIN_GROUP`**: uno o varios nombres separados por comas (por defecto en código `apip-platform-admin,admin`; en despliegue suele fijarse vía CloudFormation), **o**
 - Claim `custom:platformAdmin` = `true`.
 
 Endpoints:
