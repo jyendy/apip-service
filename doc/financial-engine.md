@@ -53,6 +53,17 @@ Metric responses include calculated fields (ROI, IRR, revenue totals, costs, net
 - Improves automatically when real data is available.
 - Provides consistent financial results across all interfaces.
 
+## Agregación por grupo (proyecto / portfolio / tipo)
+
+Para vistas agregadas, el sistema aplica esta regla obligatoria:
+
+- No promediar ROI/IRR/NPV entre assets.
+- Alinear primero las series por mes calendario global.
+- Sumar cashflows netos mensuales del grupo.
+- Recalcular ROI/IRR/NPV/Payback sobre la serie agregada.
+
+Esto aplica tanto para `asset view` (t0 = suma de `initialInvestment`) como para `equity view` (t0 = suma de `downPayment` de assets con financiamiento).
+
 ### Closing statement
 
 This platform is a **financial intelligence system**, not an operational tool. The backend defines financial truth; the frontend only visualizes it.

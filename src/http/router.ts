@@ -56,6 +56,7 @@ import { newId } from '../lib/ids'
 import { publishDomainEvent } from '../lib/events'
 import { CALCULATION_VERSION } from '../financial/engine'
 import { computeAssetFinancialPackage, computeAssetMetrics } from '../services/metrics'
+import { aggregateFinancialPackages } from '../services/aggregate-metrics'
 import {
   buildFinancialInsightInput,
   generateFinancialInsights,
@@ -833,13 +834,14 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const denied = requireRbac(ctx, event, rbacState, 'financial:read', { portfolioId })
         if (denied) return denied
         const a = await repo.listAssetsByTenant(ctx.tenantId, { portfolioId })
-        const metricsList = []
+        const packages = []
         for (const asset of a) {
           const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
           const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
-          metricsList.push(computeAssetMetrics(asset, rev, cost))
+          const fin = await repo.getFinancing(ctx.tenantId, asset.id)
+          packages.push(computeAssetFinancialPackage(asset, rev, cost, fin))
         }
-        return finalizeAudit(ctx, event, json(200, { portfolioId, assets: metricsList }))
+        return finalizeAudit(ctx, event, json(200, aggregateFinancialPackages('portfolio', portfolioId, packages)))
       }
     }
 
@@ -969,13 +971,32 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         })
         if (denied) return denied
         const a = await repo.listAssetsByTenant(ctx.tenantId, { projectId })
-        const metricsList = []
+        const packages = []
         for (const asset of a) {
           const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
           const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
-          metricsList.push(computeAssetMetrics(asset, rev, cost))
+          const fin = await repo.getFinancing(ctx.tenantId, asset.id)
+          packages.push(computeAssetFinancialPackage(asset, rev, cost, fin))
         }
-        return finalizeAudit(ctx, event, json(200, { projectId, assets: metricsList }))
+        return finalizeAudit(ctx, event, json(200, aggregateFinancialPackages('project', projectId, packages)))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'assets' && seg[2] === 'metrics' && seg.length === 3) {
+      if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', {})
+        if (denied) return denied
+        const type = event.queryStringParameters?.type as Asset['type'] | undefined
+        if (!type) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Query `type` es obligatoria')
+        const assets = await repo.listAssetsByTenant(ctx.tenantId, { type })
+        const packages = []
+        for (const asset of assets) {
+          const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
+          const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
+          const fin = await repo.getFinancing(ctx.tenantId, asset.id)
+          packages.push(computeAssetFinancialPackage(asset, rev, cost, fin))
+        }
+        return finalizeAudit(ctx, event, json(200, aggregateFinancialPackages('asset_type', type, packages)))
       }
     }
 
