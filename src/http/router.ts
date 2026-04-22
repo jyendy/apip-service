@@ -370,7 +370,26 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       }
     }
 
-    if (seg[0] === 'v1' && seg[1] === 'assets' && seg[2] && seg.length === 3) {
+    // Debe ir antes de /v1/assets/{assetId} para evitar que "metrics" se trate como assetId.
+    if (seg[0] === 'v1' && seg[1] === 'assets' && seg[2] === 'metrics' && seg.length === 3) {
+      if (method === 'GET') {
+        const denied = requireRbac(ctx, event, rbacState, 'financial:read', {})
+        if (denied) return denied
+        const type = event.queryStringParameters?.type as Asset['type'] | undefined
+        if (!type) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Query `type` es obligatoria')
+        const assets = await repo.listAssetsByTenant(ctx.tenantId, { type })
+        const packages = []
+        for (const asset of assets) {
+          const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
+          const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
+          const fin = await repo.getFinancing(ctx.tenantId, asset.id)
+          packages.push(computeAssetFinancialPackage(asset, rev, cost, fin))
+        }
+        return finalizeAudit(ctx, event, json(200, aggregateFinancialPackages('asset_type', type, packages)))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'assets' && seg[2] && seg.length === 3 && seg[2] !== 'metrics') {
       const assetId = seg[2]
       if (method === 'GET') {
         const a = await repo.getAsset(ctx.tenantId, assetId)
@@ -979,24 +998,6 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           packages.push(computeAssetFinancialPackage(asset, rev, cost, fin))
         }
         return finalizeAudit(ctx, event, json(200, aggregateFinancialPackages('project', projectId, packages)))
-      }
-    }
-
-    if (seg[0] === 'v1' && seg[1] === 'assets' && seg[2] === 'metrics' && seg.length === 3) {
-      if (method === 'GET') {
-        const denied = requireRbac(ctx, event, rbacState, 'financial:read', {})
-        if (denied) return denied
-        const type = event.queryStringParameters?.type as Asset['type'] | undefined
-        if (!type) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Query `type` es obligatoria')
-        const assets = await repo.listAssetsByTenant(ctx.tenantId, { type })
-        const packages = []
-        for (const asset of assets) {
-          const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
-          const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
-          const fin = await repo.getFinancing(ctx.tenantId, asset.id)
-          packages.push(computeAssetFinancialPackage(asset, rev, cost, fin))
-        }
-        return finalizeAudit(ctx, event, json(200, aggregateFinancialPackages('asset_type', type, packages)))
       }
     }
 
