@@ -14,6 +14,7 @@ import type {
 import { buildDebtServiceByMonth, financingPublicSnapshot, generateAmortizationSchedule } from './financing'
 import {
   CALCULATION_VERSION,
+  computeIrrFromMonthlyFlows,
   estimatePaybackMonthsFromSeries,
   irrMonthlyPercent,
   npvFromMonthlyFlows,
@@ -301,6 +302,15 @@ function financingStartOffsetMonths(acqYm: string, startIso: string): number {
   return monthsBetweenYm(acqYm, startYm)
 }
 
+function shouldFinancialAuditLog(): boolean {
+  return process.env.APIP_FINANCIAL_AUDIT_LOGS === '1' || process.env.APIP_FINANCIAL_AUDIT_LOGS === 'true'
+}
+
+function auditLog(payload: Record<string, unknown>) {
+  if (!shouldFinancialAuditLog()) return
+  console.log(JSON.stringify(payload))
+}
+
 /**
  * Métricas del activo (sin deuda) + métricas equity (apalancado) y snapshot de financiamiento.
  * La vista `asset` coincide con `computeAssetMetrics`; la vista `equity` descuenta la cuota del préstamo (no mezclada con costos operativos).
@@ -312,6 +322,49 @@ export function computeAssetFinancialPackage(
   financing: AssetFinancing | null,
 ): AssetFinancialMetricsPackage {
   const assetM = computeAssetMetrics(asset, revenue, costs)
+  auditLog({
+    tag: 'APIP_CASHFLOW_BASE',
+    entityType: 'asset',
+    entityId: asset.id,
+    view: 'asset',
+    timestamp: new Date().toISOString(),
+    initialInvestment: assetM.initialInvestment,
+    downPayment: null,
+    t0: -assetM.initialInvestment,
+    monthlyCashFlowSample: assetM.cashFlow.slice(0, 6).map(p => p.netCashFlow),
+    duration: assetM.cashFlow.length,
+  })
+  const assetFlowsForIrr = [-assetM.initialInvestment, ...assetM.cashFlow.map(p => p.netCashFlow)]
+  auditLog({
+    tag: 'APIP_IRR_INPUT',
+    entityType: 'asset',
+    entityId: asset.id,
+    view: 'asset',
+    timestamp: new Date().toISOString(),
+    t0: assetFlowsForIrr[0],
+    flowsForIrr: assetFlowsForIrr.slice(0, 10),
+    totalFlows: assetFlowsForIrr.length,
+  })
+  const irrAssetDiag = computeIrrFromMonthlyFlows(assetFlowsForIrr)
+  auditLog({
+    tag: 'APIP_IRR_RESULT',
+    entityType: 'asset',
+    entityId: asset.id,
+    view: 'asset',
+    timestamp: new Date().toISOString(),
+    monthlyRate: irrAssetDiag.monthlyRate,
+    annualRate: irrAssetDiag.annualRate,
+    methodUsed: irrAssetDiag.methodUsed,
+    iterations: irrAssetDiag.iterations,
+  })
+  auditLog({
+    tag: 'APIP_NPV_CHECK',
+    entityType: 'asset',
+    entityId: asset.id,
+    view: 'asset',
+    timestamp: new Date().toISOString(),
+    npvAtIrr: irrAssetDiag.npvAtRate,
+  })
   if (!financing) {
     return {
       assetId: asset.id,
@@ -359,9 +412,62 @@ export function computeAssetFinancialPackage(
   const down = financing.downPayment
   const roiEq = down > 0 ? simpleRoiPercent(equityNetProfit, down) : 0
   const flowsEq = down > 0 ? [-down, ...equityNets] : []
-  const irrEq = equityNets.length && down > 0 ? irrMonthlyPercent(flowsEq) : 0
+  const irrEqDiag = equityNets.length && down > 0 ? computeIrrFromMonthlyFlows(flowsEq) : null
+  const irrEq = irrEqDiag?.annualRate ?? 0
   const npvEq = equityNets.length ? npvFromMonthlyFlows(equityNets, 0.1) : 0
   const payEq = down > 0 && equityNets.length ? estimatePaybackMonthsFromSeries(equityNets, down) : 0
+  auditLog({
+    tag: 'APIP_CASHFLOW_BASE',
+    entityType: 'asset',
+    entityId: asset.id,
+    view: 'equity',
+    timestamp: new Date().toISOString(),
+    initialInvestment: asset.initialInvestment,
+    downPayment: down,
+    t0: down > 0 ? -down : 0,
+    monthlyCashFlowSample: equityNets.slice(0, 6),
+    duration: equityNets.length,
+  })
+  auditLog({
+    tag: 'APIP_IRR_INPUT',
+    entityType: 'asset',
+    entityId: asset.id,
+    view: 'equity',
+    timestamp: new Date().toISOString(),
+    t0: flowsEq[0] ?? 0,
+    flowsForIrr: flowsEq.slice(0, 10),
+    totalFlows: flowsEq.length,
+  })
+  auditLog({
+    tag: 'APIP_IRR_RESULT',
+    entityType: 'asset',
+    entityId: asset.id,
+    view: 'equity',
+    timestamp: new Date().toISOString(),
+    monthlyRate: irrEqDiag?.monthlyRate ?? null,
+    annualRate: irrEqDiag?.annualRate ?? 0,
+    methodUsed: irrEqDiag?.methodUsed ?? 'none',
+    iterations: irrEqDiag?.iterations ?? 0,
+  })
+  auditLog({
+    tag: 'APIP_NPV_CHECK',
+    entityType: 'asset',
+    entityId: asset.id,
+    view: 'equity',
+    timestamp: new Date().toISOString(),
+    npvAtIrr: irrEqDiag?.npvAtRate ?? null,
+  })
+  auditLog({
+    tag: 'APIP_VIEW_COMPARISON',
+    entityType: 'asset',
+    entityId: asset.id,
+    view: 'asset',
+    timestamp: new Date().toISOString(),
+    assetIRR: assetM.irr,
+    equityIRR: irrEq,
+    assetROI: assetM.roi,
+    equityROI: roiEq,
+  })
 
   const equityM: AssetMetricsComputed = {
     ...assetM,

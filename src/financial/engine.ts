@@ -151,6 +151,18 @@ function monthlyToAnnualEffectivePercent(monthlyRate: number): number {
  * Con `APIP_DEBUG_IRR_CASHFLOWS=1` registra flujos (inicio) y resultado del solver.
  */
 export function irrMonthlyPercent(cashFlows: number[]): number {
+  return computeIrrFromMonthlyFlows(cashFlows).annualRate
+}
+
+export type IrrComputationResult = {
+  annualRate: number
+  monthlyRate: number | null
+  methodUsed: 'newton' | 'bisection' | 'none'
+  iterations: number
+  npvAtRate: number | null
+}
+
+export function computeIrrFromMonthlyFlows(cashFlows: number[]): IrrComputationResult {
   if (debugIrrCashFlowsEnabled()) {
     const t0 = cashFlows[0]
     const first5 = cashFlows.slice(0, 5)
@@ -161,7 +173,15 @@ export function irrMonthlyPercent(cashFlows: number[]): number {
       JSON.stringify(first5),
     )
   }
-  if (cashFlows.length === 0) return 0
+  if (cashFlows.length === 0) {
+    return {
+      annualRate: 0,
+      monthlyRate: null,
+      methodUsed: 'none',
+      iterations: 0,
+      npvAtRate: null,
+    }
+  }
 
   const scaleTol = Math.max(
     1,
@@ -206,7 +226,13 @@ export function irrMonthlyPercent(cashFlows: number[]): number {
         }),
       )
     }
-    return 0
+    return {
+      annualRate: 0,
+      monthlyRate: null,
+      methodUsed: 'none',
+      iterations: 0,
+      npvAtRate: null,
+    }
   }
 
   const annualPercent = monthlyToAnnualEffectivePercent(monthlyRate)
@@ -232,7 +258,13 @@ export function irrMonthlyPercent(cashFlows: number[]): number {
     )
   }
 
-  return annualPercent
+  return {
+    annualRate: annualPercent,
+    monthlyRate,
+    methodUsed,
+    iterations,
+    npvAtRate: npvAtMonthlyRate(cashFlows, monthlyRate),
+  }
 }
 
 export function npvFromMonthlyFlows(

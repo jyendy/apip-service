@@ -5,7 +5,7 @@ import type {
   MetricsCoverage,
   MetricsDataMode,
 } from '../domain/types'
-import { CALCULATION_VERSION, estimatePaybackMonthsFromSeries, irrMonthlyPercent, npvFromMonthlyFlows, simpleRoiPercent } from '../financial/engine'
+import { CALCULATION_VERSION, computeIrrFromMonthlyFlows, estimatePaybackMonthsFromSeries, npvFromMonthlyFlows, simpleRoiPercent } from '../financial/engine'
 
 type AggregationScope = 'project' | 'portfolio' | 'asset_type'
 type AggregationView = 'asset' | 'equity'
@@ -27,6 +27,21 @@ type AlignableSeries = {
   assetId: string
   initialInvestment: number
   cashFlow: CashFlowPoint[]
+}
+
+function shouldFinancialAuditLog(): boolean {
+  return process.env.APIP_FINANCIAL_AUDIT_LOGS === '1' || process.env.APIP_FINANCIAL_AUDIT_LOGS === 'true'
+}
+
+function toEntityType(scope: AggregationScope): 'asset' | 'project' | 'portfolio' {
+  if (scope === 'project') return 'project'
+  if (scope === 'portfolio') return 'portfolio'
+  return 'asset'
+}
+
+function auditLog(payload: Record<string, unknown>) {
+  if (!shouldFinancialAuditLog()) return
+  console.log(JSON.stringify(payload))
 }
 
 function monthKey(isoDate: string): string {
@@ -66,7 +81,7 @@ function deriveMode(coverage: MetricsCoverage): MetricsDataMode {
   return 'SIMULATION'
 }
 
-function aggregateView(scopeId: string, rows: AlignableSeries[]): AssetMetricsComputed {
+function aggregateView(scope: AggregationScope, scopeId: string, view: AggregationView, rows: AlignableSeries[]): AssetMetricsComputed {
   if (rows.length === 0) {
     return {
       assetId: scopeId,
@@ -86,6 +101,19 @@ function aggregateView(scopeId: string, rows: AlignableSeries[]): AssetMetricsCo
       calculationVersion: CALCULATION_VERSION,
     }
   }
+  auditLog({
+    tag: 'APIP_AGGREGATION_INPUT',
+    entityType: toEntityType(scope),
+    entityId: scopeId,
+    view,
+    timestamp: new Date().toISOString(),
+    assetsCount: rows.length,
+    assets: rows.map(r => ({
+      assetId: r.assetId,
+      startDate: r.cashFlow[0]?.date ?? null,
+      duration: r.cashFlow.length,
+    })),
+  })
 
   const startYm = rows
     .map(r => monthKey(r.cashFlow[0]?.date ?? ''))
@@ -99,8 +127,24 @@ function aggregateView(scopeId: string, rows: AlignableSeries[]): AssetMetricsCo
     const localMax = offset + row.cashFlow.length - 1
     if (localMax > maxIndex) maxIndex = localMax
   }
-
   const months = maxIndex + 1
+  auditLog({
+    tag: 'APIP_ALIGNED_SERIES',
+    entityType: toEntityType(scope),
+    entityId: scopeId,
+    view,
+    timestamp: new Date().toISOString(),
+    sample: rows.map(r => {
+      const firstYm = monthKey(r.cashFlow[0]!.date)
+      const offset = monthsBetweenYm(startYm, firstYm)
+      const aligned = Array.from({ length: Math.min(6, months) }, (_, i) => {
+        const local = i - offset
+        return local >= 0 && local < r.cashFlow.length ? r.cashFlow[local]!.netCashFlow : 0
+      })
+      return { assetId: r.assetId, firstMonths: aligned }
+    }),
+  })
+
   const monthBuckets = Array.from({ length: months }, (_, i) => ({
     date: `${addMonthsYm(startYm, i)}-01T00:00:00.000Z`,
     revenue: 0,
@@ -149,6 +193,58 @@ function aggregateView(scopeId: string, rows: AlignableSeries[]): AssetMetricsCo
   const initialInvestment = rows.reduce((s, r) => s + r.initialInvestment, 0)
   const nets = cashFlow.map(p => p.netCashFlow)
   const netProfit = nets.reduce((a, b) => a + b, 0)
+  auditLog({
+    tag: 'APIP_CASHFLOW_BASE',
+    entityType: toEntityType(scope),
+    entityId: scopeId,
+    view,
+    timestamp: new Date().toISOString(),
+    initialInvestment,
+    downPayment: view === 'equity' ? initialInvestment : null,
+    t0: -initialInvestment,
+    monthlyCashFlowSample: nets.slice(0, 6),
+    duration: nets.length,
+  })
+  auditLog({
+    tag: 'APIP_AGGREGATED_FLOW',
+    entityType: toEntityType(scope),
+    entityId: scopeId,
+    view,
+    timestamp: new Date().toISOString(),
+    firstMonths: nets.slice(0, 6),
+    totalMonths: nets.length,
+  })
+  const flowsForIrr = initialInvestment > 0 ? [-initialInvestment, ...nets] : []
+  auditLog({
+    tag: 'APIP_IRR_INPUT',
+    entityType: toEntityType(scope),
+    entityId: scopeId,
+    view,
+    timestamp: new Date().toISOString(),
+    t0: flowsForIrr[0] ?? 0,
+    flowsForIrr: flowsForIrr.slice(0, 10),
+    totalFlows: flowsForIrr.length,
+  })
+  const irrDiag = flowsForIrr.length > 0 ? computeIrrFromMonthlyFlows(flowsForIrr) : null
+  auditLog({
+    tag: 'APIP_IRR_RESULT',
+    entityType: toEntityType(scope),
+    entityId: scopeId,
+    view,
+    timestamp: new Date().toISOString(),
+    monthlyRate: irrDiag?.monthlyRate ?? null,
+    annualRate: irrDiag?.annualRate ?? 0,
+    methodUsed: irrDiag?.methodUsed ?? 'none',
+    iterations: irrDiag?.iterations ?? 0,
+  })
+  auditLog({
+    tag: 'APIP_NPV_CHECK',
+    entityType: toEntityType(scope),
+    entityId: scopeId,
+    view,
+    timestamp: new Date().toISOString(),
+    npvAtIrr: irrDiag?.npvAtRate ?? null,
+  })
 
   return {
     assetId: scopeId,
@@ -159,7 +255,7 @@ function aggregateView(scopeId: string, rows: AlignableSeries[]): AssetMetricsCo
     ebitda: cashFlow.reduce((s, p) => s + (p.revenue - p.costs), 0),
     netProfit,
     roi: initialInvestment > 0 ? simpleRoiPercent(netProfit, initialInvestment) : 0,
-    irr: initialInvestment > 0 && nets.length > 0 ? irrMonthlyPercent([-initialInvestment, ...nets]) : 0,
+    irr: irrDiag?.annualRate ?? 0,
     paybackPeriodMonths: initialInvestment > 0 && nets.length > 0 ? estimatePaybackMonthsFromSeries(nets, initialInvestment) : 0,
     npv: nets.length > 0 ? npvFromMonthlyFlows(nets, 0.1) : 0,
     cashFlow,
@@ -178,6 +274,19 @@ export function aggregateFinancialPackages(
   const equityRows = packages.map(p => pickSeries(p, 'equity')).filter((x): x is AlignableSeries => !!x)
   const excludedForEquity = packages.filter(p => !p.metrics.equity).map(p => p.assetId)
 
+  const assetMetrics = aggregateView(scope, scopeId, 'asset', assetRows)
+  const equityMetrics = equityRows.length > 0 ? aggregateView(scope, scopeId, 'equity', equityRows) : null
+  auditLog({
+    tag: 'APIP_VIEW_COMPARISON',
+    entityType: toEntityType(scope),
+    entityId: scopeId,
+    view: 'asset',
+    timestamp: new Date().toISOString(),
+    assetIRR: assetMetrics.irr,
+    equityIRR: equityMetrics?.irr ?? null,
+    assetROI: assetMetrics.roi,
+    equityROI: equityMetrics?.roi ?? null,
+  })
   return {
     scope,
     scopeId,
@@ -186,8 +295,8 @@ export function aggregateFinancialPackages(
     includedAssetIds: packages.map(p => p.assetId),
     excludedAssetIds: excludedForEquity,
     metrics: {
-      asset: aggregateView(scopeId, assetRows),
-      equity: equityRows.length > 0 ? aggregateView(scopeId, equityRows) : null,
+      asset: assetMetrics,
+      equity: equityMetrics,
     },
   }
 }
