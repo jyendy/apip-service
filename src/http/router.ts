@@ -54,7 +54,6 @@ import { auditedJsonError, finalizeAudit, finalizePlatformAudit } from '../lib/a
 import { json, noContent } from '../lib/http'
 import { newId } from '../lib/ids'
 import { publishDomainEvent } from '../lib/events'
-import { CALCULATION_VERSION } from '../financial/engine'
 import { computeAssetFinancialPackage, computeAssetMetrics } from '../services/metrics'
 import { aggregateFinancialPackages } from '../services/aggregate-metrics'
 import {
