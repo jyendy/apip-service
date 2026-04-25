@@ -192,7 +192,10 @@ export type Simulation = {
   initialCapital: number
   expectedMonthlyRevenue: number
   expectedOperatingCost: number
+  /** @deprecated Usar revenue/cost; si solo existe, proyección lo aplica a ambos. */
   growthRatePercent?: number
+  revenueGrowthRatePercent?: number
+  costGrowthRatePercent?: number
   durationMonths: number
   discountRateAnnual?: number
   financing?: SimulationFinancingStored | null

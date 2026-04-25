@@ -17,6 +17,29 @@ describe('computeSimulationProjection', () => {
     expect(p.irr).not.toBe(0)
   })
 
+  it('crecimiento distinto ingreso vs costo altera ROI respecto a tasa única', () => {
+    const same = computeSimulationProjection({
+      initialCapital: 100_000,
+      expectedMonthlyRevenue: 5_000,
+      expectedOperatingCost: 4_000,
+      growthRatePercent: 5,
+      durationMonths: 24,
+      discountRateAnnual: 0.1,
+      financing: null,
+    })
+    const dual = computeSimulationProjection({
+      initialCapital: 100_000,
+      expectedMonthlyRevenue: 5_000,
+      expectedOperatingCost: 4_000,
+      revenueGrowthRatePercent: 8,
+      costGrowthRatePercent: 2,
+      durationMonths: 24,
+      discountRateAnnual: 0.1,
+      financing: null,
+    })
+    expect(dual.roi).not.toBeCloseTo(same.roi, 1)
+  })
+
   it('con francés: equityMetrics y cuotas alineadas a generateAmortizationSchedule', () => {
     const initialCapital = 500_000
     const principal = 400_000

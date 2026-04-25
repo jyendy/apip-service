@@ -62,7 +62,7 @@ import {
   generateFinancialInsights,
 } from '../services/financial-insights-engine'
 import * as insightRulesRepo from '../repositories/insight-rules-repository'
-import { computeSimulationProjection } from '../services/simulation-projection'
+import { computeSimulationProjection, SIMULATION_CALCULATION_VERSION } from '../services/simulation-projection'
 import { buildStandardizedStructure } from '../services/structure'
 import { buildInsights } from '../services/insights'
 import {
@@ -1560,6 +1560,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           expectedMonthlyRevenue: b.expectedMonthlyRevenue,
           expectedOperatingCost: b.expectedOperatingCost,
           growthRatePercent: b.growthRatePercent,
+          revenueGrowthRatePercent: b.revenueGrowthRatePercent,
+          costGrowthRatePercent: b.costGrowthRatePercent,
           durationMonths: b.durationMonths,
           discountRateAnnual: b.discountRateAnnual,
           financing: b.financing ?? null,
@@ -1573,6 +1575,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           expectedMonthlyRevenue: b.expectedMonthlyRevenue,
           expectedOperatingCost: b.expectedOperatingCost,
           growthRatePercent: b.growthRatePercent,
+          revenueGrowthRatePercent: b.revenueGrowthRatePercent,
+          costGrowthRatePercent: b.costGrowthRatePercent,
           durationMonths: b.durationMonths,
           discountRateAnnual: b.discountRateAnnual,
           financing: b.financing ?? null,
@@ -1581,7 +1585,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           projectedIRR: projection.irr,
           projectedNPV: projection.npv,
           breakEvenMonth: projection.breakEvenMonth,
-          calculationVersion: CALCULATION_VERSION,
+          calculationVersion: SIMULATION_CALCULATION_VERSION,
           createdAt: now,
           updatedAt: now,
         }
@@ -1614,6 +1618,8 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           expectedMonthlyRevenue: merged.expectedMonthlyRevenue,
           expectedOperatingCost: merged.expectedOperatingCost,
           growthRatePercent: merged.growthRatePercent,
+          revenueGrowthRatePercent: merged.revenueGrowthRatePercent,
+          costGrowthRatePercent: merged.costGrowthRatePercent,
           durationMonths: merged.durationMonths,
           discountRateAnnual: merged.discountRateAnnual,
           financing,
@@ -1626,7 +1632,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           projectedIRR: projection.irr,
           projectedNPV: projection.npv,
           breakEvenMonth: projection.breakEvenMonth,
-          calculationVersion: CALCULATION_VERSION,
+          calculationVersion: SIMULATION_CALCULATION_VERSION,
           updatedAt: new Date().toISOString(),
         }
         await repo.putSimulation(updated)

@@ -78,7 +78,10 @@ export const simulationBody = z.object({
   initialCapital: z.number().positive(),
   expectedMonthlyRevenue: z.number().nonnegative(),
   expectedOperatingCost: z.number().nonnegative(),
-  growthRatePercent: z.number().optional(),
+  /** Si no hay revenue/cost growth, se usa para ambos (legado). */
+  growthRatePercent: z.number().min(0).max(100).optional(),
+  revenueGrowthRatePercent: z.number().min(0).max(100).optional(),
+  costGrowthRatePercent: z.number().min(0).max(100).optional(),
   durationMonths: z.number().int().positive().max(600),
   discountRateAnnual: z.number().optional(),
   financing: simulationFinancingBody.optional(),

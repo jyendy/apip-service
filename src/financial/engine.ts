@@ -31,6 +31,28 @@ export function buildMonthlyCashFlowSeries(input: MonthlySeriesInput): {
   return out
 }
 
+/** Crecimiento compuesto distinto para ingresos y costos (misma convención que `projectedRevCost` en métricas de activo). */
+export function buildMonthlyCashFlowSeriesDualGrowth(input: {
+  months: number
+  monthlyRevenue: number
+  monthlyCosts: number
+  revenueGrowthRateMonthly: number
+  costGrowthRateMonthly: number
+}): { revenue: number; costs: number; net: number; cumulative: number }[] {
+  const out: { revenue: number; costs: number; net: number; cumulative: number }[] = []
+  let cumulative = 0
+  for (let i = 0; i < input.months; i++) {
+    const gRev = Math.pow(1 + input.revenueGrowthRateMonthly, i)
+    const gCost = Math.pow(1 + input.costGrowthRateMonthly, i)
+    const revenue = input.monthlyRevenue * gRev
+    const costs = input.monthlyCosts * gCost
+    const net = revenue - costs
+    cumulative += net
+    out.push({ revenue, costs, net, cumulative })
+  }
+  return out
+}
+
 export function simpleRoiPercent(netProfitApprox: number, initialInvestment: number): number {
   if (initialInvestment === 0) return 0
   return (netProfitApprox / initialInvestment) * 100

@@ -1,6 +1,6 @@
 import type { SimulationEquityMetrics, SimulationFinancingStored } from '../domain/types'
 import {
-  buildMonthlyCashFlowSeries,
+  buildMonthlyCashFlowSeriesDualGrowth,
   estimatePaybackMonthsFromSeries,
   irrMonthlyPercent,
   npvFromMonthlyFlows,
@@ -8,15 +8,23 @@ import {
 } from '../financial/engine'
 import { buildDebtServiceByMonth, generateAmortizationSchedule } from './financing'
 
+/** Versión de la lógica de simulación (independiente de activos; subir al cambiar reglas del Lab). */
+export const SIMULATION_CALCULATION_VERSION = '2026.04.2'
+
 /**
  * Proyección del Simulation Lab: vista sin deuda (como antes) y, si hay préstamo, métricas **equity**
  * (flujo operativo menos cuota; TIR con [-enganche, …]; NPV/payback homólogos a `computeAssetFinancialPackage`).
+ *
+ * Crecimiento: `revenueGrowthRatePercent` / `costGrowthRatePercent` anuales compuestos en mensual (como activo);
+ * si solo viene `growthRatePercent` (legado), se aplica a ambos.
  */
 export function computeSimulationProjection(input: {
   initialCapital: number
   expectedMonthlyRevenue: number
   expectedOperatingCost: number
   growthRatePercent?: number
+  revenueGrowthRatePercent?: number
+  costGrowthRatePercent?: number
   durationMonths: number
   discountRateAnnual?: number
   financing?: SimulationFinancingStored | null
@@ -27,14 +35,17 @@ export function computeSimulationProjection(input: {
   breakEvenMonth: number
   equityMetrics: SimulationEquityMetrics | null
 } {
-  const growthMonthly = (input.growthRatePercent ?? 0) / 100 / 12
+  const revAnnual = input.revenueGrowthRatePercent ?? input.growthRatePercent ?? 0
+  const costAnnual = input.costGrowthRatePercent ?? input.growthRatePercent ?? 0
+  const revG = revAnnual / 100 / 12
+  const costG = costAnnual / 100 / 12
   const disc = input.discountRateAnnual ?? 0.1
-  const series = buildMonthlyCashFlowSeries({
+  const series = buildMonthlyCashFlowSeriesDualGrowth({
     months: input.durationMonths,
     monthlyRevenue: input.expectedMonthlyRevenue,
     monthlyCosts: input.expectedOperatingCost,
-    growthRateMonthly: growthMonthly,
-    initialInvestment: input.initialCapital,
+    revenueGrowthRateMonthly: revG,
+    costGrowthRateMonthly: costG,
   })
   const nets = series.map(s => s.net)
   const flows = [-input.initialCapital, ...nets]
@@ -42,10 +53,8 @@ export function computeSimulationProjection(input: {
   const npv = npvFromMonthlyFlows(nets, disc)
   const totalProfit = nets.reduce((a, s) => a + s, 0)
   const roi = simpleRoiPercent(totalProfit, input.initialCapital)
-  const breakEvenMonth = series.findIndex((_row, i) => {
-    const cum = series.slice(0, i + 1).reduce((x, y) => x + y.net, 0)
-    return cum >= input.initialCapital
-  })
+  const breakEvenMonth =
+    input.initialCapital > 0 ? estimatePaybackMonthsFromSeries(nets, input.initialCapital) : input.durationMonths
 
   const fin = input.financing
   let equityMetrics: SimulationEquityMetrics | null = null
