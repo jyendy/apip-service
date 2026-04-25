@@ -16,6 +16,30 @@ export function getJwtClaims(event: APIGatewayProxyEventV2): Record<string, stri
   return jwt?.claims as Record<string, string> | undefined
 }
 
+/**
+ * Parsea `cognito:groups` (lista separada por comas).
+ * Algunos mapeos de API Gateway / authorizers dejan corchetes literales por ítem, p. ej. `[apip-platform-admin]`
+ * en lugar de `apip-platform-admin`, lo que rompía la comparación con `PLATFORM_ADMIN_GROUP`.
+ */
+export function parseCognitoGroupsClaim(raw: string | undefined): string[] {
+  if (!raw?.trim()) return []
+  return raw
+    .split(',')
+    .map(s => normalizeCognitoGroupSegment(s))
+    .filter(Boolean)
+}
+
+function normalizeCognitoGroupSegment(segment: string): string {
+  let t = segment.trim()
+  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
+    t = t.slice(1, -1).trim()
+  }
+  while (t.startsWith('[') && t.endsWith(']') && t.length > 2) {
+    t = t.slice(1, -1).trim()
+  }
+  return t
+}
+
 /** Nombres de grupos Cognito que otorgan acceso a `/v1/admin/*` (lista separada por comas en `PLATFORM_ADMIN_GROUP`). */
 function configuredPlatformAdminGroups(): string[] {
   const raw = process.env.PLATFORM_ADMIN_GROUP ?? 'apip-platform-admin,admin'
@@ -75,7 +99,7 @@ export function resolvePlatformAdmin(event: APIGatewayProxyEventV2): { subject: 
   }
 
   const raw = claims['cognito:groups']
-  const groups = raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : []
+  const groups = parseCognitoGroupsClaim(raw)
   const allowed = configuredPlatformAdminGroups()
   const matchedGroup = allowed.find(g => groups.includes(g)) ?? null
 
