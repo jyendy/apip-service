@@ -1,3 +1,4 @@
+---
 # Ola 1: data, messaging, artifacts, cognito (paralelo). Build Lambda → S3. Ola 2: API.
 # Cuenta AWS: deploy/env/aws-apip-{dev|stg|prd}.env (variable AWS_ACCOUNT_ID).
 # GitHub Environment: solo AWS_REGION (Cognito sale del stack apip-cognito + ImportValue).
@@ -17,9 +18,23 @@ permissions:
   contents: read
 
 jobs:
+  validate-workflow:
+    name: Validate workflow YAML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install yamllint
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install yamllint
+      - name: Lint workflow yaml
+        run: |
+          yamllint -d '{extends: default, rules: {truthy: disable, line-length: disable}}' .github/workflows/deploy.yml
+
   qa-build:
     name: QA build (lint, typecheck, test, build)
     runs-on: ubuntu-latest
+    needs: [validate-workflow]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
