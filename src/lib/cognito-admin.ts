@@ -1,6 +1,7 @@
 import {
   AdminCreateUserCommand,
   AdminGetUserCommand,
+  AdminSetUserPasswordCommand,
   CognitoIdentityProviderClient,
   type UserType,
 } from '@aws-sdk/client-cognito-identity-provider'
@@ -84,4 +85,51 @@ export async function ensureCognitoUser(input: EnsureCognitoUserInput): Promise<
     if (!sub) throw new Error('Usuario ya existe en Cognito pero no se pudo resolver sub')
     return { sub, email }
   }
+}
+
+/**
+ * Asigna contraseña en Cognito (admin). Prueba `username` email y luego `cognitoSub` por si el pool usa uno u otro.
+ */
+export async function setCognitoUserPassword(input: {
+  email?: string
+  cognitoSub: string
+  password: string
+  /** Por defecto true: el usuario puede entrar sin flujo FORCE_CHANGE_PASSWORD. */
+  permanent?: boolean
+}): Promise<void> {
+  const poolId = userPoolId()
+  const pwd = input.password
+  const permanent = input.permanent ?? true
+  const candidates: string[] = []
+  const em = input.email?.trim()
+  if (em) candidates.push(em)
+  const sub = input.cognitoSub.trim()
+  if (sub && !candidates.includes(sub)) candidates.push(sub)
+
+  let last: unknown
+  for (const username of candidates) {
+    if (!username) continue
+    try {
+      await cognito.send(
+        new AdminSetUserPasswordCommand({
+          UserPoolId: poolId,
+          Username: username,
+          Password: pwd,
+          Permanent: permanent,
+        }),
+      )
+      return
+    } catch (error) {
+      last = error
+      const name = (error as { name?: string }).name
+      if (name === 'UserNotFoundException') continue
+      if (name === 'InvalidPasswordException') {
+        throw new Error(
+          'La contraseña no cumple la política del user pool de Cognito (longitud y complejidad).',
+        )
+      }
+      throw error
+    }
+  }
+  throw last instanceof Error ? last : new Error('No se pudo asignar contraseña en Cognito (usuario no encontrado).')
 }

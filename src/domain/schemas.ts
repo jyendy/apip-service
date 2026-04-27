@@ -431,6 +431,21 @@ export const patchAccessUserBody = z.object({
   rbacAssignments: z.array(rbacAssignmentInput).optional(),
 })
 
+/** Igual que `patchAccessUserBody` más contraseña Cognito (solo rutas admin plataforma). */
+export const patchAdminAccessUserBody = patchAccessUserBody.extend({
+  cognitoNewPassword: z.preprocess(
+    v => {
+      if (v === undefined || v === null) return undefined
+      if (typeof v !== 'string') return v
+      const t = v.trim()
+      return t === '' ? undefined : t
+    },
+    z.string().min(8).max(256).optional(),
+  ),
+  /** Si es false, Cognito exige cambio de contraseña en el siguiente inicio de sesión. Por defecto true. */
+  cognitoPasswordPermanent: z.boolean().optional(),
+})
+
 export const createAdminTenantUserBody = z.object({
   email: z.preprocess(v => (typeof v === 'string' ? v.trim().toLowerCase() : v), z.string().email()),
   displayName: z.preprocess(

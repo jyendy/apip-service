@@ -29,6 +29,7 @@ import {
   listQuery,
   patchAccessRoleBody,
   patchAccessUserBody,
+  patchAdminAccessUserBody,
   putSelfUserProfileBody,
   patchAssetBody,
   patchInvestorBody,
@@ -55,7 +56,7 @@ import { auditedJsonError, finalizeAudit, finalizePlatformAudit } from '../lib/a
 import { json, noContent } from '../lib/http'
 import { newId } from '../lib/ids'
 import { publishDomainEvent } from '../lib/events'
-import { ensureCognitoUser } from '../lib/cognito-admin'
+import { ensureCognitoUser, setCognitoUserPassword } from '../lib/cognito-admin'
 import { computeAssetFinancialPackage, computeAssetMetrics } from '../services/metrics'
 import { aggregateFinancialPackages } from '../services/aggregate-metrics'
 import {
@@ -250,11 +251,21 @@ async function routeAdmin(
     if (seg.length === 7 && seg[6]) {
       const targetSub = seg[6]
       if (method === 'PATCH') {
-        const body = patchAccessUserBody.safeParse(parseBody(event))
+        const body = patchAdminAccessUserBody.safeParse(parseBody(event))
         if (!body.success)
           return auditedJsonError(adminCtx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const existing = await accessRepo.getTenantUserProfile(tenantId, targetSub)
         if (!existing) return auditedJsonError(adminCtx, event, 404, 'NOT_FOUND', 'Usuario no encontrado en este tenant')
+        const { cognitoNewPassword, cognitoPasswordPermanent, ...profilePatch } = body.data
+        if (cognitoNewPassword) {
+          const emailForCognito = profilePatch.email ?? existing.email
+          await setCognitoUserPassword({
+            email: emailForCognito,
+            cognitoSub: targetSub,
+            password: cognitoNewPassword,
+            permanent: cognitoPasswordPermanent ?? true,
+          })
+        }
         const now = new Date().toISOString()
         const rbacAssignments =
           body.data.rbacAssignments !== undefined
@@ -262,7 +273,7 @@ async function routeAdmin(
             : existing.rbacAssignments
         const updated: TenantUserProfile = {
           ...existing,
-          ...body.data,
+          ...profilePatch,
           rbacAssignments,
           updatedAt: now,
         }
