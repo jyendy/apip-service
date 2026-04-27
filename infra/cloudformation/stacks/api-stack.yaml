@@ -727,6 +727,14 @@ Resources:
       AuthorizationType: JWT
       AuthorizerId: !Ref ApipJwtAuthorizer
       Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePostV1AdminTenantsIdAccessUsers:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: POST /v1/admin/tenants/{tenantId}/access/users
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
   ApipJwtRoutePatchV1AdminTenantsIdAccessUsersCognitoSub:
     Type: AWS::ApiGatewayV2::Route
     Properties:
