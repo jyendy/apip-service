@@ -109,9 +109,11 @@ import type {
 
 const BUS = process.env.EVENT_BUS_NAME
 
-function parseBody<T>(raw: string | undefined): T {
+function parseBody<T>(event: Pick<APIGatewayProxyEventV2, 'body' | 'isBase64Encoded'>): T {
+  const raw = event.body
   if (!raw) return {} as T
-  return JSON.parse(raw) as T
+  const text = event.isBase64Encoded ? Buffer.from(raw, 'base64').toString('utf8') : raw
+  return JSON.parse(text) as T
 }
 
 function segments(path: string): string[] {
@@ -148,7 +150,7 @@ async function routeAdmin(
       return finalizePlatformAudit(event, adminCtx.subject, json(200, { items }))
     }
     if (method === 'POST') {
-      const body = createTenantBody.safeParse(parseBody(event.body))
+      const body = createTenantBody.safeParse(parseBody(event))
       if (!body.success)
         return auditedJsonError(adminCtx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
       const now = new Date().toISOString()
@@ -173,7 +175,7 @@ async function routeAdmin(
     if (method === 'PATCH') {
       const existing = await repo.getTenant(tenantId)
       if (!existing) return auditedJsonError(adminCtx, event, 404, 'NOT_FOUND', 'Tenant no encontrado')
-      const body = patchTenantBody.safeParse(parseBody(event.body))
+      const body = patchTenantBody.safeParse(parseBody(event))
       if (!body.success)
         return auditedJsonError(adminCtx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
       const t: Tenant = {
@@ -197,7 +199,7 @@ async function routeAdmin(
     }
 
     if (seg.length === 6 && method === 'POST') {
-      const body = createAdminTenantUserBody.safeParse(parseBody(event.body))
+      const body = createAdminTenantUserBody.safeParse(parseBody(event))
       if (!body.success)
         return auditedJsonError(adminCtx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
 
@@ -247,7 +249,7 @@ async function routeAdmin(
     if (seg.length === 7 && seg[6]) {
       const targetSub = seg[6]
       if (method === 'PATCH') {
-        const body = patchAccessUserBody.safeParse(parseBody(event.body))
+        const body = patchAccessUserBody.safeParse(parseBody(event))
         if (!body.success)
           return auditedJsonError(adminCtx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const existing = await accessRepo.getTenantUserProfile(tenantId, targetSub)
@@ -267,7 +269,7 @@ async function routeAdmin(
         return finalizePlatformAudit(event, adminCtx.subject, json(200, updated))
       }
       if (method === 'PUT') {
-        const body = patchAccessUserBody.safeParse(parseBody(event.body))
+        const body = patchAccessUserBody.safeParse(parseBody(event))
         if (!body.success)
           return auditedJsonError(adminCtx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const existing = await accessRepo.getTenantUserProfile(tenantId, targetSub)
@@ -378,7 +380,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         return finalizeAudit(ctx, event, json(200, { items: assets, nextCursor: null }))
       }
       if (method === 'POST') {
-        const body = createAssetBody.safeParse(parseBody(event.body))
+        const body = createAssetBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const b = body.data
         const deniedW = requireRbac(ctx, event, rbacState, 'asset:write', {
@@ -458,7 +460,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           projectId: a.projectId,
         })
         if (deniedW) return deniedW
-        const body = patchAssetBody.safeParse(parseBody(event.body))
+        const body = patchAssetBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const touchesStructuralFields =
           body.data.type !== undefined ||
@@ -527,7 +529,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           projectId: a.projectId,
         })
         if (deniedW) return deniedW
-        const body = putAssetFinancingBody.safeParse(parseBody(event.body))
+        const body = putAssetFinancingBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const existing = await repo.getFinancing(ctx.tenantId, assetId)
@@ -636,7 +638,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           projectId: a.projectId,
         })
         if (deniedW) return deniedW
-        const body = putAssetCashFlowsBody.safeParse(parseBody(event.body))
+        const body = putAssetCashFlowsBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const src = (s: string | undefined): RevenueFact['source'] => {
@@ -706,7 +708,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'POST') {
         const denied = requireRbac(ctx, event, rbacState, 'user:manage', {})
         if (denied) return denied
-        const body = createAccessRoleBody.safeParse(parseBody(event.body))
+        const body = createAccessRoleBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const permErr = validatePermissionKeys(body.data.permissionKeys)
         if (permErr) return auditedJsonError(ctx, event, 400, 'VALIDATION', permErr)
@@ -739,7 +741,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         if (denied) return denied
         const existing = await accessRepo.getAccessRole(ctx.tenantId, roleId)
         if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Rol no encontrado')
-        const body = patchAccessRoleBody.safeParse(parseBody(event.body))
+        const body = patchAccessRoleBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         if (body.data.permissionKeys) {
           const permErr = validatePermissionKeys(body.data.permissionKeys)
@@ -778,7 +780,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'PATCH') {
         const denied = requireRbac(ctx, event, rbacState, 'user:manage', {})
         if (denied) return denied
-        const body = patchAccessUserBody.safeParse(parseBody(event.body))
+        const body = patchAccessUserBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const existing = await accessRepo.getTenantUserProfile(ctx.tenantId, targetSub)
         if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Usuario no encontrado en este tenant')
@@ -817,7 +819,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         )
       }
       if (method === 'PUT') {
-        const body = putSelfUserProfileBody.safeParse(parseBody(event.body))
+        const body = putSelfUserProfileBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const existing = await accessRepo.getTenantUserProfile(ctx.tenantId, sub)
@@ -851,7 +853,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'POST') {
         const denied = requireRbac(ctx, event, rbacState, 'asset:write', {})
         if (denied) return denied
-        const body = createPortfolioBody.safeParse(parseBody(event.body))
+        const body = createPortfolioBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const p: Portfolio = {
@@ -882,7 +884,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         if (denied) return denied
         const p = await repo.getPortfolio(ctx.tenantId, id)
         if (!p) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Portfolio no encontrado')
-        const body = patchPortfolioBody.safeParse(parseBody(event.body))
+        const body = patchPortfolioBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const updated: Portfolio = {
@@ -970,7 +972,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
-        const body = createProjectBody.safeParse(parseBody(event.body))
+        const body = createProjectBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const denied = requireRbac(ctx, event, rbacState, 'asset:write', { portfolioId: body.data.portfolioId })
         if (denied) return denied
@@ -1015,7 +1017,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           projectId: id,
         })
         if (denied) return denied
-        const body = patchProjectBody.safeParse(parseBody(event.body))
+        const body = patchProjectBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const updated: Project = {
@@ -1082,7 +1084,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           projectId,
         })
         if (denied) return denied
-        const body = putProjectInvestorAllocationsBody.safeParse(parseBody(event.body))
+        const body = putProjectInvestorAllocationsBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         try {
           await validateAndReplaceProjectAllocations(ctx.tenantId, projectId, body.data.allocations)
@@ -1228,7 +1230,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'POST') {
         const denied = requireRbac(ctx, event, rbacState, 'user:manage', {})
         if (denied) return denied
-        const body = createInvestorBody.safeParse(parseBody(event.body))
+        const body = createInvestorBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const inv: Investor = {
@@ -1262,7 +1264,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         if (denied) return denied
         const existing = await repo.getInvestor(ctx.tenantId, investorId)
         if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Inversionista no encontrado')
-        const body = patchInvestorBody.safeParse(parseBody(event.body))
+        const body = patchInvestorBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const updated: Investor = { ...existing, ...body.data, updatedAt: now }
@@ -1293,7 +1295,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         if (denied) return denied
         const inv = await repo.getInvestor(ctx.tenantId, investorId)
         if (!inv) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Inversionista no encontrado')
-        const body = investorLedgerEntryBody.safeParse(parseBody(event.body))
+        const body = investorLedgerEntryBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const entry: InvestorLedgerEntry = {
@@ -1340,7 +1342,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'POST') {
         const denied = requireRbac(ctx, event, rbacState, 'operation:write', {})
         if (denied) return denied
-        const body = importAssetsBody.safeParse(parseBody(event.body))
+        const body = importAssetsBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const b = body.data
 
@@ -1445,7 +1447,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'POST') {
         const denied = requireRbac(ctx, event, rbacState, 'operation:write', {})
         if (denied) return denied
-        const body = importTmsRatesBody.safeParse(parseBody(event.body))
+        const body = importTmsRatesBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         if (!body.data.rows || body.data.rows.length === 0) {
           return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Para MVP usa rows inline (Excel se procesa en front)')
@@ -1494,7 +1496,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'POST') {
         const denied = requireRbac(ctx, event, rbacState, 'operation:write', {})
         if (denied) return denied
-        const body = importTmsOrderTripsBody.safeParse(parseBody(event.body))
+        const body = importTmsOrderTripsBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         if (!body.data.rows || body.data.rows.length === 0) {
           return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Para MVP usa rows inline (Excel se procesa en front)')
@@ -1599,7 +1601,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'POST') {
         const denied = requireRbac(ctx, event, rbacState, 'financial:analyze', {})
         if (denied) return denied
-        const body = simulationBody.safeParse(parseBody(event.body))
+        const body = simulationBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const b = body.data
         const now = new Date().toISOString()
@@ -1657,7 +1659,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         if (denied) return denied
         const sim = await repo.getSimulation(ctx.tenantId, simulationId)
         if (!sim) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Simulación no encontrada')
-        const body = patchSimulationBody.safeParse(parseBody(event.body))
+        const body = patchSimulationBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const merged = { ...sim, ...body.data }
         const financing =
@@ -1723,7 +1725,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
-        const body = createTmsCustomerBody.safeParse(parseBody(event.body))
+        const body = createTmsCustomerBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const c: TmsCustomer = {
@@ -1750,7 +1752,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'PATCH') {
         const existing = await repo.getTmsCustomer(ctx.tenantId, customerId)
         if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Cliente no encontrado')
-        const body = patchTmsCustomerBody.safeParse(parseBody(event.body))
+        const body = patchTmsCustomerBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const updated: TmsCustomer = { ...existing, ...body.data, updatedAt: now }
@@ -1777,7 +1779,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
-        const body = createTmsLocalityBody.safeParse(parseBody(event.body))
+        const body = createTmsLocalityBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const loc: TmsLocality = {
@@ -1805,7 +1807,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'PATCH') {
         const existing = await repo.getTmsLocality(ctx.tenantId, localityId)
         if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Localidad no encontrada')
-        const body = patchTmsLocalityBody.safeParse(parseBody(event.body))
+        const body = patchTmsLocalityBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const updated: TmsLocality = { ...existing, ...body.data, updatedAt: now }
@@ -1832,7 +1834,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
-        const body = createTmsProviderBody.safeParse(parseBody(event.body))
+        const body = createTmsProviderBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const p: TmsTransportProvider = {
@@ -1860,7 +1862,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'PATCH') {
         const existing = await repo.getTmsProvider(ctx.tenantId, providerId)
         if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proveedor no encontrado')
-        const body = patchTmsProviderBody.safeParse(parseBody(event.body))
+        const body = patchTmsProviderBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const updated: TmsTransportProvider = { ...existing, ...body.data, updatedAt: now }
@@ -1875,7 +1877,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
-        const body = createTmsDriverBody.safeParse(parseBody(event.body))
+        const body = createTmsDriverBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const provider = await repo.getTmsProvider(ctx.tenantId, body.data.providerId)
         if (!provider) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proveedor no encontrado')
@@ -1902,7 +1904,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
-        const body = createTmsVehicleUnitBody.safeParse(parseBody(event.body))
+        const body = createTmsVehicleUnitBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const provider = await repo.getTmsProvider(ctx.tenantId, body.data.providerId)
         if (!provider) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proveedor no encontrado')
@@ -1948,7 +1950,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
-        const body = createTmsRateBody.safeParse(parseBody(event.body))
+        const body = createTmsRateBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const [customer, origin, destination, provider] = await Promise.all([
           repo.getTmsCustomer(ctx.tenantId, body.data.customerId),
@@ -1988,7 +1990,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
-        const body = createTmsRouteBody.safeParse(parseBody(event.body))
+        const body = createTmsRouteBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const route: TmsRoute = {
@@ -2013,7 +2015,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
-        const body = createTransportOrderBody.safeParse(parseBody(event.body))
+        const body = createTransportOrderBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         let denorm: { customerName: string; originLabel: string; destinationLabel: string; providerName: string }
         try {
@@ -2091,7 +2093,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'PATCH') {
         const existing = await repo.getTransportOrder(ctx.tenantId, orderId)
         if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Orden no encontrada')
-        const body = patchTransportOrderBody.safeParse(parseBody(event.body))
+        const body = patchTransportOrderBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const updated: TransportOrder = { ...existing, ...body.data, updatedAt: now }
@@ -2172,7 +2174,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         return finalizeAudit(ctx, event, json(200, { items }))
       }
       if (method === 'POST') {
-        const body = createTransportTripBody.safeParse(parseBody(event.body))
+        const body = createTransportTripBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         try {
           await requireTransportAsset(ctx.tenantId, body.data.assetId)
@@ -2253,7 +2255,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'PATCH') {
         const existing = await repo.getTransportTrip(ctx.tenantId, tripId)
         if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Viaje no encontrado')
-        const body = patchTransportTripBody.safeParse(parseBody(event.body))
+        const body = patchTransportTripBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         const now = new Date().toISOString()
         const updated: TransportTrip = { ...existing, ...body.data, updatedAt: now }
@@ -2330,7 +2332,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'POST') {
         const trip = await repo.getTransportTrip(ctx.tenantId, tripId)
         if (!trip) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Viaje no encontrado')
-        const body = tmsTripCostBody.safeParse(parseBody(event.body))
+        const body = tmsTripCostBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         if (body.data.assetId !== trip.assetId) {
           return auditedJsonError(ctx, event, 400, 'VALIDATION', 'assetId debe coincidir con el viaje')
@@ -2368,7 +2370,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'POST') {
         const trip = await repo.getTransportTrip(ctx.tenantId, tripId)
         if (!trip) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Viaje no encontrado')
-        const body = tmsTripRevenueBody.safeParse(parseBody(event.body))
+        const body = tmsTripRevenueBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
         if (body.data.assetId !== trip.assetId) {
           return auditedJsonError(ctx, event, 400, 'VALIDATION', 'assetId debe coincidir con el viaje')

@@ -416,7 +416,7 @@ export const rbacAssignmentInput = z.object({
   id: z.string().min(1).optional(),
   userId: z.string().optional(),
   tenantId: z.string().optional(),
-  role: rbacRoleSchema,
+  role: z.preprocess(v => (typeof v === 'string' ? v.trim().toLowerCase() : v), rbacRoleSchema),
   portfolioId: z.string().optional(),
   projectId: z.string().optional(),
   createdAt: z.string().optional(),
@@ -432,12 +432,36 @@ export const patchAccessUserBody = z.object({
 })
 
 export const createAdminTenantUserBody = z.object({
-  email: z.string().email(),
-  displayName: z.string().min(1).optional(),
-  photoUrl: z.string().url().optional(),
-  preferences: z.record(z.string(), z.unknown()).optional(),
-  roleIds: z.array(z.string().min(1)).optional(),
-  rbacAssignments: z.array(rbacAssignmentInput).optional(),
+  email: z.preprocess(v => (typeof v === 'string' ? v.trim().toLowerCase() : v), z.string().email()),
+  displayName: z.preprocess(
+    v => {
+      if (v === undefined || v === null) return undefined
+      if (typeof v !== 'string') return v
+      const t = v.trim()
+      return t === '' ? undefined : t
+    },
+    z.string().min(1).optional(),
+  ),
+  photoUrl: z.preprocess(
+    v => {
+      if (v === undefined || v === null) return undefined
+      if (typeof v === 'string' && v.trim() === '') return undefined
+      return v
+    },
+    z.string().url().optional(),
+  ),
+  preferences: z.preprocess(
+    v => (v === null || v === undefined ? undefined : v),
+    z.record(z.string(), z.unknown()).optional(),
+  ),
+  roleIds: z.preprocess(
+    v => (v === null || v === undefined ? undefined : v),
+    z.array(z.string().min(1)).optional(),
+  ),
+  rbacAssignments: z.preprocess(
+    v => (v === null || v === undefined ? undefined : v),
+    z.array(rbacAssignmentInput).optional(),
+  ),
 })
 
 export const rejectDocumentBody = z.object({
