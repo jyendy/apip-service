@@ -6,6 +6,7 @@ import { requireRbac } from '../auth/require-rbac'
 import * as accessRepo from '../repositories/access-repository'
 import * as repo from '../repositories/core-repository'
 import {
+  createAdminTenantUserBody,
   createAccessRoleBody,
   createAssetBody,
   createInvestorBody,
@@ -54,6 +55,7 @@ import { auditedJsonError, finalizeAudit, finalizePlatformAudit } from '../lib/a
 import { json, noContent } from '../lib/http'
 import { newId } from '../lib/ids'
 import { publishDomainEvent } from '../lib/events'
+import { ensureCognitoUser } from '../lib/cognito-admin'
 import { computeAssetFinancialPackage, computeAssetMetrics } from '../services/metrics'
 import { aggregateFinancialPackages } from '../services/aggregate-metrics'
 import {
@@ -192,6 +194,54 @@ async function routeAdmin(
     if (seg.length === 6 && method === 'GET') {
       const items = await accessRepo.listTenantUserProfiles(tenantId)
       return finalizePlatformAudit(event, adminCtx.subject, json(200, { items }))
+    }
+
+    if (seg.length === 6 && method === 'POST') {
+      const body = createAdminTenantUserBody.safeParse(parseBody(event.body))
+      if (!body.success)
+        return auditedJsonError(adminCtx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+
+      const cognito = await ensureCognitoUser({
+        email: body.data.email,
+        displayName: body.data.displayName,
+      })
+      const targetSub = cognito.sub
+      const existing = await accessRepo.getTenantUserProfile(tenantId, targetSub)
+      const now = new Date().toISOString()
+      const rbacAssignments =
+        body.data.rbacAssignments !== undefined
+          ? normalizeRbacAssignmentsInput(tenantId, targetSub, body.data.rbacAssignments)
+          : existing?.rbacAssignments ?? []
+
+      if (!existing) {
+        const created: TenantUserProfile = {
+          tenantId,
+          cognitoSub: targetSub,
+          email: cognito.email,
+          displayName: body.data.displayName,
+          photoUrl: body.data.photoUrl,
+          preferences: body.data.preferences,
+          roleIds: body.data.roleIds ?? [],
+          rbacAssignments,
+          createdAt: now,
+          updatedAt: now,
+        }
+        await accessRepo.putTenantUserProfile(created)
+        return finalizePlatformAudit(event, adminCtx.subject, json(201, created))
+      }
+
+      const updated: TenantUserProfile = {
+        ...existing,
+        email: cognito.email,
+        displayName: body.data.displayName ?? existing.displayName,
+        photoUrl: body.data.photoUrl ?? existing.photoUrl,
+        preferences: body.data.preferences ?? existing.preferences,
+        roleIds: body.data.roleIds ?? existing.roleIds,
+        rbacAssignments,
+        updatedAt: now,
+      }
+      await accessRepo.putTenantUserProfile(updated)
+      return finalizePlatformAudit(event, adminCtx.subject, json(200, updated))
     }
 
     if (seg.length === 7 && seg[6]) {

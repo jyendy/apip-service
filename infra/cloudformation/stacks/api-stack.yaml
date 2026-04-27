@@ -61,6 +61,8 @@ Resources:
           ALLOW_DEV_TENANT_HEADER: 'false'
           PLATFORM_ADMIN_GROUP: !Ref PlatformAdminGroupNames
           APIP_DOCUMENTS_BUCKET_NAME: !Ref DocumentsBucketName
+          COGNITO_USER_POOL_ID:
+            Fn::ImportValue: apip-cognito-user-pool-id
       Code:
         S3Bucket: !Ref LambdaCodeBucket
         S3Key: !Ref LambdaCodeKey

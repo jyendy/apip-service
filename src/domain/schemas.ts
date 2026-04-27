@@ -431,6 +431,15 @@ export const patchAccessUserBody = z.object({
   rbacAssignments: z.array(rbacAssignmentInput).optional(),
 })
 
+export const createAdminTenantUserBody = z.object({
+  email: z.string().email(),
+  displayName: z.string().min(1).optional(),
+  photoUrl: z.string().url().optional(),
+  preferences: z.record(z.string(), z.unknown()).optional(),
+  roleIds: z.array(z.string().min(1)).optional(),
+  rbacAssignments: z.array(rbacAssignmentInput).optional(),
+})
+
 export const rejectDocumentBody = z.object({
   reason: z.string().max(2000).optional(),
 })
