@@ -462,6 +462,16 @@ export const createAdminTenantUserBody = z.object({
     v => (v === null || v === undefined ? undefined : v),
     z.array(rbacAssignmentInput).optional(),
   ),
+  /** Si se envía, Cognito crea el usuario sin correo (SUPPRESS + contraseña temporal). Mín. 8 caracteres (ajustar a la política del pool). */
+  initialPassword: z.preprocess(
+    v => {
+      if (v === undefined || v === null) return undefined
+      if (typeof v !== 'string') return v
+      const t = v.trim()
+      return t === '' ? undefined : t
+    },
+    z.string().min(8).max(256).optional(),
+  ),
 })
 
 export const rejectDocumentBody = z.object({
