@@ -206,6 +206,7 @@ async function routeAdmin(
 
       const cognito = await ensureCognitoUser({
         email: body.data.email,
+        tenantId,
         displayName: body.data.displayName,
         initialPassword: body.data.initialPassword,
       })

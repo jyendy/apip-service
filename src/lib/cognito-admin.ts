@@ -2,12 +2,15 @@ import {
   AdminCreateUserCommand,
   AdminGetUserCommand,
   AdminSetUserPasswordCommand,
+  AdminUpdateUserAttributesCommand,
   CognitoIdentityProviderClient,
   type UserType,
 } from '@aws-sdk/client-cognito-identity-provider'
 
 export type EnsureCognitoUserInput = {
   email: string
+  /** Se persiste en Cognito como `custom:tenantId` para que el ID token lo lleve a la API. */
+  tenantId: string
   displayName?: string
   /** Contraseña temporal en Cognito; si existe, no se envía invitación por correo (MessageAction SUPPRESS). */
   initialPassword?: string
@@ -23,6 +26,18 @@ function userPoolId(): string {
 
 function readAttribute(user: UserType | undefined, key: string): string | undefined {
   return user?.Attributes?.find(a => a.Name === key)?.Value
+}
+
+async function setCognitoTenantClaim(poolId: string, username: string, tenantId: string): Promise<void> {
+  const tid = tenantId.trim()
+  if (!tid) throw new Error('tenantId vacío para custom:tenantId')
+  await cognito.send(
+    new AdminUpdateUserAttributesCommand({
+      UserPoolId: poolId,
+      Username: username,
+      UserAttributes: [{ Name: 'custom:tenantId', Value: tid }],
+    }),
+  )
 }
 
 async function getUserByEmail(poolId: string, email: string): Promise<UserType | undefined> {
@@ -46,12 +61,15 @@ export async function ensureCognitoUser(input: EnsureCognitoUserInput): Promise<
   const poolId = userPoolId()
   const email = input.email.trim().toLowerCase()
   if (!email) throw new Error('Email inválido para crear usuario en Cognito')
+  const tenantId = input.tenantId.trim()
+  if (!tenantId) throw new Error('tenantId requerido para crear o asegurar usuario en Cognito')
   const displayName = input.displayName?.trim()
   const initialPassword = input.initialPassword?.trim()
 
   const userAttributes = [
     { Name: 'email', Value: email },
     { Name: 'email_verified', Value: 'true' },
+    { Name: 'custom:tenantId', Value: tenantId },
     ...(displayName ? [{ Name: 'name', Value: displayName }] : []),
   ]
 
@@ -83,6 +101,7 @@ export async function ensureCognitoUser(input: EnsureCognitoUserInput): Promise<
     const existing = await getUserByEmail(poolId, email)
     const sub = readAttribute(existing, 'sub')
     if (!sub) throw new Error('Usuario ya existe en Cognito pero no se pudo resolver sub')
+    await setCognitoTenantClaim(poolId, email, tenantId)
     return { sub, email }
   }
 }
