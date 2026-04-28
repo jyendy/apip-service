@@ -128,6 +128,15 @@ Resources:
       AuthorizationType: NONE
       Target: !Sub 'integrations/${ApipLambdaIntegration}'
 
+  # Onboarding público (website/signup) sin JWT.
+  ApipPublicRoutePostV1OnboardingRequests:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: POST /v1/public/onboarding-requests
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+
   # Rutas explícitas (JWT) — sin ANY /{proxy+}. CORS vía CorsConfiguration en ApipHttpApi.
   ApipJwtRouteGetV1Assets:
     Type: AWS::ApiGatewayV2::Route
@@ -804,6 +813,22 @@ Resources:
     Properties:
       ApiId: !Ref ApipHttpApi
       RouteKey: PUT /v1/admin/tenants/{tenantId}/access/users/{cognitoSub}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1AdminOnboardingRequests:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/admin/onboarding-requests
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePatchV1AdminOnboardingRequestsId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: PATCH /v1/admin/onboarding-requests/{requestId}
       AuthorizationType: JWT
       AuthorizerId: !Ref ApipJwtAuthorizer
       Target: !Sub 'integrations/${ApipLambdaIntegration}'
