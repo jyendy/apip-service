@@ -16,6 +16,7 @@ import type {
   Project,
   ProjectInvestorAllocation,
   RevenueFact,
+  Scenario,
   Simulation,
   Tenant,
   TmsCustomer,
@@ -54,6 +55,7 @@ const ENTITY = {
   TMS_VEHICLE_UNIT: 'TMS_VEHICLE_UNIT',
   TMS_RATE: 'TMS_RATE',
   TMS_ROUTE: 'TMS_ROUTE',
+  SCENARIO: 'SCENARIO',
 } as const
 
 type CoreItem = Record<string, unknown> & { PK: string; SK: string }
@@ -1036,6 +1038,76 @@ export async function deleteTmsLocality(tenantId: string, localityId: string): P
     new DeleteCommand({
       TableName: tableName(),
       Key: { PK: keys.pkTenant(tenantId), SK: keys.skTmsLocality(localityId) },
+    }),
+  )
+}
+
+export async function putScenario(s: Scenario): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(s.tenantId, keys.skScenario(s.id), {
+        entityType: ENTITY.SCENARIO,
+        GSI4PK: keys.gsi4pkScenariosByProject(s.tenantId, s.projectId),
+        GSI4SK: keys.gsi4skScenario(s.id),
+        ...s,
+      }),
+    }),
+  )
+}
+
+export async function getScenario(tenantId: string, scenarioId: string): Promise<Scenario | null> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new GetCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skScenario(scenarioId) },
+    }),
+  )
+  if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.SCENARIO) return null
+  return r.Item as unknown as Scenario
+}
+
+export async function listScenariosByProject(tenantId: string, projectId: string): Promise<Scenario[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      IndexName: 'GSI4',
+      KeyConditionExpression: 'GSI4PK = :gpk',
+      ExpressionAttributeValues: {
+        ':gpk': keys.gsi4pkScenariosByProject(tenantId, projectId),
+      },
+    }),
+  )
+  const rows = (r.Items ?? []) as CoreItem[]
+  return rows.filter(x => x.entityType === ENTITY.SCENARIO) as unknown as Scenario[]
+}
+
+export async function listAllScenariosForTenant(tenantId: string): Promise<Scenario[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      FilterExpression: 'entityType = :et',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': 'SCENARIO#',
+        ':et': ENTITY.SCENARIO,
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as Scenario[]
+}
+
+export async function deleteScenarioItem(tenantId: string, scenarioId: string): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new DeleteCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skScenario(scenarioId) },
     }),
   )
 }

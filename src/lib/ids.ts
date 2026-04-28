@@ -9,6 +9,7 @@ export const newId = {
   tenant: () => shortId('ten'),
   portfolio: () => shortId('prt'),
   project: () => shortId('prj'),
+  scenario: () => shortId('scn'),
   asset: () => shortId('ast'),
   fact: () => shortId('fact'),
   capital: () => shortId('cap'),

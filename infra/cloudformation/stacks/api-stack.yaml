@@ -153,6 +153,62 @@ Resources:
       AuthorizationType: JWT
       AuthorizerId: !Ref ApipJwtAuthorizer
       Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1Scenarios:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/scenarios
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePostV1Scenarios:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: POST /v1/scenarios
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1ScenariosId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/scenarios/{scenarioId}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePatchV1ScenariosId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: PATCH /v1/scenarios/{scenarioId}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteDeleteV1ScenariosId:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: DELETE /v1/scenarios/{scenarioId}
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRouteGetV1ScenariosIdAssets:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: GET /v1/scenarios/{scenarioId}/assets
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
+  ApipJwtRoutePostV1ScenariosIdAssets:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApipHttpApi
+      RouteKey: POST /v1/scenarios/{scenarioId}/assets
+      AuthorizationType: JWT
+      AuthorizerId: !Ref ApipJwtAuthorizer
+      Target: !Sub 'integrations/${ApipLambdaIntegration}'
   ApipJwtRouteGetV1AssetsId:
     Type: AWS::ApiGatewayV2::Route
     Properties:

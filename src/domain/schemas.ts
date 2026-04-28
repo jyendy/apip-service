@@ -44,6 +44,8 @@ const financialModelSchema = z
 export const createAssetBody = z.object({
   portfolioId: z.string().min(1),
   projectId: z.string().min(1),
+  /** Escenario simulado u actual canónico; omitir = actual (legacy). */
+  scenarioId: z.string().min(1).nullable().optional(),
   name: z.string().min(1),
   type: z.enum(['transport', 'real_estate', 'machinery', 'energy', 'other']),
   acquisitionDate: z.string().datetime(),
@@ -56,12 +58,30 @@ export const createAssetBody = z.object({
 
 export const patchAssetBody = createAssetBody.partial().omit({ portfolioId: true, projectId: true })
 
+export const createScenarioBody = z.object({
+  projectId: z.string().min(1),
+  name: z.string().min(1),
+})
+
+export const patchScenarioBody = z.object({
+  name: z.string().min(1).optional(),
+})
+
 export const listQuery = z.object({
   projectId: z.string().optional(),
   portfolioId: z.string().optional(),
   type: z.enum(['transport', 'real_estate', 'machinery', 'energy', 'other']).optional(),
   limit: z.coerce.number().min(1).max(100).optional(),
   cursor: z.string().optional(),
+  /** Filtro de escenario para listados de activos (requiere `scenarioId` si no es `actual`). */
+  scenario: z.enum(['actual', 'simulated', 'combined']).optional(),
+  scenarioId: z.string().min(1).optional(),
+})
+
+/** Query `scenario` / `scenarioId` para métricas agregadas (dashboard, insights). */
+export const financialScenarioQuery = z.object({
+  scenario: z.enum(['actual', 'simulated', 'combined']).optional(),
+  scenarioId: z.string().min(1).optional(),
 })
 
 export const simulationFinancingBody = z.object({

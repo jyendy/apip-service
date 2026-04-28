@@ -37,6 +37,21 @@ export type Project = {
   updatedAt: string
 }
 
+export type ScenarioType = 'actual' | 'simulated'
+
+/** Escenario de planeación o baseline actual por proyecto. */
+export type Scenario = {
+  id: string
+  tenantId: string
+  portfolioId: string
+  projectId: string
+  name: string
+  type: ScenarioType
+  createdAt: string
+  updatedAt: string
+  createdBy: string
+}
+
 export type AssetType = 'transport' | 'real_estate' | 'machinery' | 'energy' | 'other'
 
 export type AssetStatus = 'active' | 'inactive' | 'maintenance' | 'sold'
@@ -55,6 +70,8 @@ export type Asset = {
   tenantId: string
   portfolioId: string
   projectId: string
+  /** Escenario al que pertenece el activo; ausente o null = vista actual (legacy o escenario actual canónico). */
+  scenarioId?: string | null
   name: string
   type: AssetType
   acquisitionDate: string

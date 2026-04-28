@@ -12,6 +12,7 @@ import {
   createInvestorBody,
   createPortfolioBody,
   createProjectBody,
+  createScenarioBody,
   createTenantBody,
   createTmsCustomerBody,
   createTmsDriverBody,
@@ -35,6 +36,7 @@ import {
   patchInvestorBody,
   patchPortfolioBody,
   patchProjectBody,
+  patchScenarioBody,
   patchTenantBody,
   patchSimulationBody,
   patchTmsCustomerBody,
@@ -68,6 +70,12 @@ import { computeSimulationProjection, SIMULATION_CALCULATION_VERSION } from '../
 import { buildStandardizedStructure } from '../services/structure'
 import { buildInsights } from '../services/insights'
 import {
+  ensureDefaultActualScenarioForProject,
+  loadProjectAssetsForScenarioMetrics,
+  loadTenantAssetsForExecutiveDashboard,
+  resolveScenarioIdForAssetWrite,
+} from '../services/scenario-load'
+import {
   buildInvestorCapitalAccount,
   buildPortfolioCapitalParticipation,
   buildProjectCapitalParticipation,
@@ -93,6 +101,7 @@ import type {
   InvestorLedgerEntry,
   Portfolio,
   Project,
+  Scenario,
   RevenueFact,
   Simulation,
   Tenant,
@@ -375,6 +384,184 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
   try {
     const rbacState = await loadRbacState(ctx)
 
+    // --- /v1/scenarios ---
+    if (seg[0] === 'v1' && seg[1] === 'scenarios') {
+      if (seg.length === 2 && method === 'GET') {
+        const projectId = event.queryStringParameters?.projectId?.trim()
+        if (!projectId) {
+          return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Query projectId es obligatoria')
+        }
+        const pj = await repo.getProject(ctx.tenantId, projectId)
+        if (!pj) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proyecto no encontrado')
+        const denied = requireRbac(ctx, event, rbacState, 'asset:read', {
+          portfolioId: pj.portfolioId,
+          projectId,
+        })
+        if (denied) return denied
+        const items = await repo.listScenariosByProject(ctx.tenantId, projectId)
+        return finalizeAudit(ctx, event, json(200, { items }))
+      }
+      if (seg.length === 2 && method === 'POST') {
+        const body = createScenarioBody.safeParse(parseBody(event))
+        if (!body.success)
+          return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const pj = await repo.getProject(ctx.tenantId, body.data.projectId)
+        if (!pj) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'projectId no existe')
+        const deniedW = requireRbac(ctx, event, rbacState, 'asset:write', {
+          portfolioId: pj.portfolioId,
+          projectId: body.data.projectId,
+        })
+        if (deniedW) return deniedW
+        await ensureDefaultActualScenarioForProject({
+          tenantId: ctx.tenantId,
+          portfolioId: pj.portfolioId,
+          projectId: pj.id,
+          createdBy: ctx.subject,
+        })
+        const now = new Date().toISOString()
+        const s: Scenario = {
+          id: newId.scenario(),
+          tenantId: ctx.tenantId,
+          portfolioId: pj.portfolioId,
+          projectId: pj.id,
+          name: body.data.name,
+          type: 'simulated',
+          createdAt: now,
+          updatedAt: now,
+          createdBy: ctx.subject ?? 'system',
+        }
+        await repo.putScenario(s)
+        return finalizeAudit(ctx, event, json(201, s))
+      }
+
+      if (seg.length === 3 && seg[2]) {
+        const scenarioId = seg[2]
+        const existing = await repo.getScenario(ctx.tenantId, scenarioId)
+        if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Escenario no encontrado')
+        const pj = await repo.getProject(ctx.tenantId, existing.projectId)
+        if (!pj) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proyecto no encontrado')
+
+        if (method === 'GET') {
+          const denied = requireRbac(ctx, event, rbacState, 'asset:read', {
+            portfolioId: pj.portfolioId,
+            projectId: existing.projectId,
+          })
+          if (denied) return denied
+          return finalizeAudit(ctx, event, json(200, existing))
+        }
+        if (method === 'PATCH') {
+          const deniedW = requireRbac(ctx, event, rbacState, 'asset:write', {
+            portfolioId: pj.portfolioId,
+            projectId: existing.projectId,
+          })
+          if (deniedW) return deniedW
+          const body = patchScenarioBody.safeParse(parseBody(event))
+          if (!body.success)
+            return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+          const now = new Date().toISOString()
+          const updated: Scenario = { ...existing, ...body.data, updatedAt: now }
+          await repo.putScenario(updated)
+          return finalizeAudit(ctx, event, json(200, updated))
+        }
+        if (method === 'DELETE') {
+          const deniedW = requireRbac(ctx, event, rbacState, 'asset:write', {
+            portfolioId: pj.portfolioId,
+            projectId: existing.projectId,
+          })
+          if (deniedW) return deniedW
+          if (existing.type === 'actual') {
+            return auditedJsonError(ctx, event, 409, 'CONFLICT', 'No se puede eliminar el escenario actual canónico')
+          }
+          const assetsInProj = await repo.listAssetsByTenant(ctx.tenantId, { projectId: existing.projectId })
+          if (assetsInProj.some(a => a.scenarioId === existing.id)) {
+            return auditedJsonError(ctx, event, 409, 'CONFLICT', 'Hay activos asociados a este escenario')
+          }
+          await repo.deleteScenarioItem(ctx.tenantId, scenarioId)
+          return finalizeAudit(ctx, event, noContent())
+        }
+      }
+
+      if (seg.length === 4 && seg[2] && seg[3] === 'assets') {
+        const scenarioId = seg[2]
+        const scen = await repo.getScenario(ctx.tenantId, scenarioId)
+        if (!scen) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Escenario no encontrado')
+        const pj = await repo.getProject(ctx.tenantId, scen.projectId)
+        if (!pj) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proyecto no encontrado')
+        if (scen.type !== 'simulated') {
+          return auditedJsonError(
+            ctx,
+            event,
+            400,
+            'VALIDATION',
+            'Solo los escenarios simulados admiten alta de activos por esta ruta',
+          )
+        }
+
+        if (method === 'GET') {
+          const denied = requireRbac(ctx, event, rbacState, 'asset:read', {
+            portfolioId: pj.portfolioId,
+            projectId: scen.projectId,
+          })
+          if (denied) return denied
+          const assets = await repo.listAssetsByTenant(ctx.tenantId, { projectId: scen.projectId })
+          const items = assets.filter(a => a.scenarioId === scen.id)
+          return finalizeAudit(ctx, event, json(200, { items }))
+        }
+
+        if (method === 'POST') {
+          const deniedW = requireRbac(ctx, event, rbacState, 'asset:write', {
+            portfolioId: pj.portfolioId,
+            projectId: scen.projectId,
+          })
+          if (deniedW) return deniedW
+          const body = createAssetBody.safeParse(parseBody(event))
+          if (!body.success)
+            return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+          const b = body.data
+          if (b.projectId !== scen.projectId || b.portfolioId !== scen.portfolioId) {
+            return auditedJsonError(
+              ctx,
+              event,
+              400,
+              'VALIDATION',
+              'portfolioId/projectId deben coincidir con el escenario',
+            )
+          }
+          const pf = await repo.getPortfolio(ctx.tenantId, b.portfolioId)
+          if (!pf) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'portfolioId no existe')
+          const pjr = await repo.getProject(ctx.tenantId, b.projectId)
+          if (!pjr || pjr.portfolioId !== b.portfolioId) {
+            return auditedJsonError(ctx, event, 400, 'VALIDATION', 'projectId no existe o no pertenece al portfolio')
+          }
+          const now = new Date().toISOString()
+          const asset: Asset = {
+            id: newId.asset(),
+            tenantId: ctx.tenantId,
+            portfolioId: b.portfolioId,
+            projectId: b.projectId,
+            scenarioId: scen.id,
+            name: b.name,
+            type: b.type,
+            acquisitionDate: b.acquisitionDate,
+            initialInvestment: b.initialInvestment,
+            currency: b.currency ?? 'USD',
+            status: b.status ?? 'active',
+            metadata: b.metadata,
+            financialModel: b.financialModel,
+            createdAt: now,
+            updatedAt: now,
+          }
+          await repo.putAsset(asset)
+          await publishDomainEvent(BUS, 'apip.service', {
+            tenantId: ctx.tenantId,
+            type: 'AssetCreated',
+            payload: { assetId: asset.id },
+          })
+          return finalizeAudit(ctx, event, json(201, asset))
+        }
+      }
+    }
+
     // --- /v1/assets ---
     if (seg[0] === 'v1' && seg[1] === 'assets' && seg.length === 2) {
       if (method === 'GET') {
@@ -385,11 +572,41 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           projectId: q.data.projectId,
         })
         if (denied) return denied
-        const assets = await repo.listAssetsByTenant(ctx.tenantId, {
+        let assets = await repo.listAssetsByTenant(ctx.tenantId, {
           projectId: q.data.projectId,
           portfolioId: q.data.portfolioId,
           type: q.data.type,
         })
+        const scMode = q.data.scenario
+        if (scMode && scMode !== 'actual') {
+          if (!q.data.projectId) {
+            return auditedJsonError(
+              ctx,
+              event,
+              400,
+              'VALIDATION',
+              'Para scenario simulated o combined se requiere query projectId',
+            )
+          }
+          const loaded = await loadProjectAssetsForScenarioMetrics(ctx.tenantId, q.data.projectId, {
+            scenario: scMode,
+            scenarioId: q.data.scenarioId,
+          })
+          if (!loaded.ok) return auditedJsonError(ctx, event, 400, 'VALIDATION', loaded.message)
+          assets = loaded.assets
+        } else if (scMode === 'actual' || !scMode) {
+          if (q.data.projectId) {
+            const loaded = await loadProjectAssetsForScenarioMetrics(ctx.tenantId, q.data.projectId, {
+              scenario: 'actual',
+            })
+            if (!loaded.ok) return auditedJsonError(ctx, event, 400, 'VALIDATION', loaded.message)
+            assets = loaded.assets
+          } else if (scMode === 'actual') {
+            const loaded = await loadTenantAssetsForExecutiveDashboard(ctx.tenantId, { scenario: 'actual' })
+            if (!loaded.ok) return auditedJsonError(ctx, event, 400, 'VALIDATION', loaded.message)
+            assets = loaded.assets
+          }
+        }
         return finalizeAudit(ctx, event, json(200, { items: assets, nextCursor: null }))
       }
       if (method === 'POST') {
@@ -407,12 +624,21 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         if (!pj || pj.portfolioId !== b.portfolioId) {
           return auditedJsonError(ctx, event, 400, 'VALIDATION', 'projectId no existe o no pertenece al portfolio')
         }
+        await ensureDefaultActualScenarioForProject({
+          tenantId: ctx.tenantId,
+          portfolioId: pj.portfolioId,
+          projectId: pj.id,
+          createdBy: ctx.subject,
+        })
+        const resSc = await resolveScenarioIdForAssetWrite(ctx.tenantId, b.portfolioId, b.projectId, b.scenarioId)
+        if (!resSc.ok) return auditedJsonError(ctx, event, 400, 'VALIDATION', resSc.message)
         const now = new Date().toISOString()
         const asset: Asset = {
           id: newId.asset(),
           tenantId: ctx.tenantId,
           portfolioId: b.portfolioId,
           projectId: b.projectId,
+          ...(resSc.scenarioId != null ? { scenarioId: resSc.scenarioId } : {}),
           name: b.name,
           type: b.type,
           acquisitionDate: b.acquisitionDate,
@@ -475,11 +701,23 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         if (deniedW) return deniedW
         const body = patchAssetBody.safeParse(parseBody(event))
         if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const { scenarioId: incomingScenario, ...restPatch } = body.data
+        const patch: Partial<Asset> = { ...restPatch }
+        if (incomingScenario !== undefined) {
+          const resSc = await resolveScenarioIdForAssetWrite(
+            ctx.tenantId,
+            a.portfolioId,
+            a.projectId,
+            incomingScenario,
+          )
+          if (!resSc.ok) return auditedJsonError(ctx, event, 400, 'VALIDATION', resSc.message)
+          patch.scenarioId = resSc.scenarioId
+        }
         const touchesStructuralFields =
-          body.data.type !== undefined ||
-          body.data.acquisitionDate !== undefined ||
-          body.data.initialInvestment !== undefined ||
-          body.data.currency !== undefined
+          patch.type !== undefined ||
+          patch.acquisitionDate !== undefined ||
+          patch.initialInvestment !== undefined ||
+          patch.currency !== undefined
         if (touchesStructuralFields) {
           const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
           const cost = await repo.listCostFacts(ctx.tenantId, assetId)
@@ -494,7 +732,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const now = new Date().toISOString()
         const updated: Asset = {
           ...a,
-          ...body.data,
+          ...patch,
           updatedAt: now,
         }
         await repo.putAsset(updated)
@@ -1006,6 +1244,12 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           updatedAt: now,
         }
         await repo.putProject(p)
+        await ensureDefaultActualScenarioForProject({
+          tenantId: ctx.tenantId,
+          portfolioId: p.portfolioId,
+          projectId: p.id,
+          createdBy: ctx.subject,
+        })
         return finalizeAudit(ctx, event, json(201, p))
       }
     }
@@ -1053,7 +1297,13 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           projectId,
         })
         if (denied) return denied
-        const a = await repo.listAssetsByTenant(ctx.tenantId, { projectId })
+        const loaded = await loadProjectAssetsForScenarioMetrics(
+          ctx.tenantId,
+          projectId,
+          event.queryStringParameters ?? null,
+        )
+        if (!loaded.ok) return auditedJsonError(ctx, event, 400, 'VALIDATION', loaded.message)
+        const a = loaded.assets
         const packages = []
         for (const asset of a) {
           const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
@@ -1061,7 +1311,14 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           const fin = await repo.getFinancing(ctx.tenantId, asset.id)
           packages.push(computeAssetFinancialPackage(asset, rev, cost, fin))
         }
-        return finalizeAudit(ctx, event, json(200, aggregateFinancialPackages('project', projectId, packages)))
+        return finalizeAudit(
+          ctx,
+          event,
+          json(200, {
+            ...aggregateFinancialPackages('project', projectId, packages),
+            scenario: loaded.meta,
+          }),
+        )
       }
     }
 
@@ -1075,7 +1332,13 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           projectId,
         })
         if (denied) return denied
-        const a = await repo.listAssetsByTenant(ctx.tenantId, { projectId })
+        const loaded = await loadProjectAssetsForScenarioMetrics(
+          ctx.tenantId,
+          projectId,
+          event.queryStringParameters ?? null,
+        )
+        if (!loaded.ok) return auditedJsonError(ctx, event, 400, 'VALIDATION', loaded.message)
+        const a = loaded.assets
         const series = []
         for (const asset of a) {
           const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
@@ -1083,7 +1346,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           const m = computeAssetMetrics(asset, rev, cost)
           series.push({ assetId: asset.id, cashFlow: m.cashFlow })
         }
-        return finalizeAudit(ctx, event, json(200, { projectId, series }))
+        return finalizeAudit(ctx, event, json(200, { scenario: loaded.meta, projectId, series }))
       }
     }
 
@@ -1139,7 +1402,9 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'GET') {
         const denied = requireRbac(ctx, event, rbacState, 'financial:read', {})
         if (denied) return denied
-        const assets = await repo.listAssetsByTenant(ctx.tenantId, {})
+        const loaded = await loadTenantAssetsForExecutiveDashboard(ctx.tenantId, event.queryStringParameters ?? null)
+        if (!loaded.ok) return auditedJsonError(ctx, event, 400, 'VALIDATION', loaded.message)
+        const assets = loaded.assets
         const totalCap = assets.reduce((s, x) => s + x.initialInvestment, 0)
         let totalRev = 0
         let totalCost = 0
@@ -1180,6 +1445,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const irrAvg = assets.length ? irrSum / assets.length : 0
 
         return finalizeAudit(ctx, event, json(200, {
+          scenario: loaded.meta,
           kpis: {
             totalCapitalDeployed: totalCap,
             portfolioROI,
@@ -1199,7 +1465,9 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       if (method === 'GET') {
         const denied = requireRbac(ctx, event, rbacState, 'financial:analyze', {})
         if (denied) return denied
-        const assets = await repo.listAssetsByTenant(ctx.tenantId, {})
+        const loaded = await loadTenantAssetsForExecutiveDashboard(ctx.tenantId, event.queryStringParameters ?? null)
+        if (!loaded.ok) return auditedJsonError(ctx, event, 400, 'VALIDATION', loaded.message)
+        const assets = loaded.assets
         const enriched = []
         for (const asset of assets) {
           const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
@@ -1207,7 +1475,10 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           const m = computeAssetMetrics(asset, rev, cost)
           enriched.push({ id: asset.id, name: asset.name, metrics: m })
         }
-        return finalizeAudit(ctx, event, json(200, { items: buildInsights(ctx.tenantId, enriched) }))
+        return finalizeAudit(ctx, event, json(200, {
+          scenario: loaded.meta,
+          items: buildInsights(ctx.tenantId, enriched),
+        }))
       }
     }
 
@@ -1383,6 +1654,12 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
               if (!pj || pj.portfolioId !== row.portfolioId) {
                 throw new Error('projectId no existe o no pertenece al portfolio')
               }
+              await ensureDefaultActualScenarioForProject({
+                tenantId: ctx.tenantId,
+                portfolioId: row.portfolioId,
+                projectId: row.projectId,
+                createdBy: ctx.subject,
+              })
               const asset: Asset = {
                 id: newId.asset(),
                 tenantId: ctx.tenantId,

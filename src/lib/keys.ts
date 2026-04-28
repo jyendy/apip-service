@@ -18,6 +18,8 @@ export const skPortfolio = (portfolioId: string) => `PORTFOLIO#${portfolioId}`
 
 export const skProject = (projectId: string) => `PROJECT#${projectId}`
 
+export const skScenario = (scenarioId: string) => `SCENARIO#${scenarioId}`
+
 export const skAsset = (assetId: string) => `ASSET#${assetId}`
 
 export const skRevenueFact = (assetId: string, factId: string) => `ASSET#${assetId}#REV#${factId}`
@@ -68,6 +70,12 @@ export const gsi1pkProjectAssets = (tenantId: string, projectId: string) =>
   `TENANT#${tenantId}#PROJECT#${projectId}`
 
 export const gsi1skAsset = (assetId: string) => `ASSET#${assetId}`
+
+/** GSI4: listar escenarios por proyecto */
+export const gsi4pkScenariosByProject = (tenantId: string, projectId: string) =>
+  `TENANT#${tenantId}#PROJECT#${projectId}`
+
+export const gsi4skScenario = (scenarioId: string) => `SCENARIO#${scenarioId}`
 
 /** GSI2: listar activos por tipo */
 export const gsi2pkAssetType = (tenantId: string, assetType: string) =>
