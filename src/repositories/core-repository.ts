@@ -231,23 +231,33 @@ export async function tryAcquireOnboardingRateLimit(
   const ddb = getDocumentClient()
   const nowSec = Math.floor(Date.now() / 1000)
   const expiresAt = nowSec + Math.max(10, ttlSeconds)
-  try {
-    await ddb.send(
-      new PutCommand({
-        TableName: tableName(),
-        Item: {
-          PK: keys.pkPlatformRateLimit(),
-          SK: keys.skOnboardingRateLimit(kind, key),
-          entityType: 'RATE_LIMIT',
-          expiresAt,
-        },
-        ConditionExpression: 'attribute_not_exists(PK)',
-      }),
-    )
-    return true
-  } catch {
+  const pk = keys.pkPlatformRateLimit()
+  const sk = keys.skOnboardingRateLimit(kind, key)
+
+  // OJO: TTL de Dynamo no elimina de forma inmediata; por eso validamos expiresAt en lectura.
+  const current = await ddb.send(
+    new GetCommand({
+      TableName: tableName(),
+      Key: { PK: pk, SK: sk },
+    }),
+  )
+  const activeUntil = Number((current.Item as { expiresAt?: unknown } | undefined)?.expiresAt ?? 0)
+  if (Number.isFinite(activeUntil) && activeUntil > nowSec) {
     return false
   }
+
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: {
+        PK: pk,
+        SK: sk,
+        entityType: 'RATE_LIMIT',
+        expiresAt,
+      },
+    }),
+  )
+  return true
 }
 
 export async function putPortfolio(p: Portfolio): Promise<void> {
