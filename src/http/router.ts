@@ -13,6 +13,7 @@ import {
   createPortfolioBody,
   createProjectBody,
   createScenarioBody,
+  createBillingIntentBody,
   createTenantBody,
   createTmsCustomerBody,
   createTmsDriverBody,
@@ -37,6 +38,7 @@ import {
   patchPortfolioBody,
   patchProjectBody,
   patchScenarioBody,
+  patchBillingIntentBody,
   patchTenantBody,
   patchSimulationBody,
   patchTmsCustomerBody,
@@ -104,7 +106,9 @@ import type {
   Scenario,
   RevenueFact,
   Simulation,
+  BillingIntent,
   Tenant,
+  TenantBilling,
   TenantUserProfile,
   TmsCustomer,
   TmsDriver,
@@ -138,6 +142,22 @@ function validatePermissionKeys(keys: string[]): string | null {
   return null
 }
 
+function normalizeTenantBillingInput(input: {
+  status: TenantBilling['status']
+  plan: string
+  stripeCustomerId?: string
+  stripeSubscriptionId?: string
+}): TenantBilling {
+  const out: TenantBilling = {
+    status: input.status,
+    plan: input.plan.trim() as TenantBilling['plan'],
+    updatedAt: new Date().toISOString(),
+  }
+  if (input.stripeCustomerId) out.stripeCustomerId = input.stripeCustomerId.trim()
+  if (input.stripeSubscriptionId) out.stripeSubscriptionId = input.stripeSubscriptionId.trim()
+  return out
+}
+
 async function ensureTenant(
   ctx: { tenantId: string; subject?: string },
   event: APIGatewayProxyEventV2,
@@ -154,6 +174,28 @@ async function routeAdmin(
   seg: string[],
   adminCtx: { tenantId: string; subject: string },
 ): Promise<APIGatewayProxyResultV2> {
+  if (seg[2] === 'onboarding-requests' && seg.length === 3 && method === 'GET') {
+    const items = await repo.listBillingIntents()
+    return finalizePlatformAudit(event, adminCtx.subject, json(200, { items }))
+  }
+  if (seg[2] === 'onboarding-requests' && seg[3] && seg.length === 4 && method === 'PATCH') {
+    const existing = await repo.getBillingIntent(seg[3])
+    if (!existing) return auditedJsonError(adminCtx, event, 404, 'NOT_FOUND', 'Solicitud no encontrada')
+    const body = patchBillingIntentBody.safeParse(parseBody(event))
+    if (!body.success)
+      return auditedJsonError(adminCtx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+    const now = new Date().toISOString()
+    const next: BillingIntent = {
+      ...existing,
+      ...(body.data.status ? { status: body.data.status } : {}),
+      ...(body.data.notes !== undefined ? { notes: body.data.notes } : {}),
+      ...(body.data.status ? { processedAt: now, processedBy: adminCtx.subject } : {}),
+      updatedAt: now,
+    }
+    await repo.putBillingIntent(next)
+    return finalizePlatformAudit(event, adminCtx.subject, json(200, next))
+  }
+
   if (seg[2] === 'tenants' && seg.length === 3) {
     if (method === 'GET') {
       const items = await repo.listTenants()
@@ -171,6 +213,7 @@ async function routeAdmin(
         type: body.data.type,
         createdAt: now,
       }
+      if (body.data.billing) t.billing = normalizeTenantBillingInput(body.data.billing)
       await repo.putTenant(t)
       return finalizePlatformAudit(event, adminCtx.subject, json(201, t))
     }
@@ -188,9 +231,13 @@ async function routeAdmin(
       const body = patchTenantBody.safeParse(parseBody(event))
       if (!body.success)
         return auditedJsonError(adminCtx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+      const { billing: billingPatch, ...tenantPatch } = body.data
       const t: Tenant = {
         ...existing,
-        ...body.data,
+        ...tenantPatch,
+      }
+      if (billingPatch !== undefined) {
+        t.billing = billingPatch ? normalizeTenantBillingInput(billingPatch) : undefined
       }
       await repo.putTenant(t)
       return finalizePlatformAudit(event, adminCtx.subject, json(200, t))
@@ -355,6 +402,49 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
   }
 
   const seg = segments(path)
+
+  if (seg[0] === 'v1' && seg[1] === 'public' && seg[2] === 'onboarding-requests' && seg.length === 3 && method === 'POST') {
+    const ip =
+      event.headers?.['x-forwarded-for']?.split(',')?.[0]?.trim() ??
+      (event.requestContext?.http as { sourceIp?: string } | undefined)?.sourceIp ??
+      'unknown'
+    const body = createBillingIntentBody.safeParse(parseBody(event))
+    if (!body.success) return auditedJsonError(undefined, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+    const email = body.data.email.trim().toLowerCase()
+
+    // Anti-spam MVP: 1 request por email cada 10 min + 1 request por IP cada 30s.
+    const okEmail = await repo.tryAcquireOnboardingRateLimit('email', email, 10 * 60)
+    const okIp = await repo.tryAcquireOnboardingRateLimit('ip', ip, 30)
+    if (!okEmail || !okIp) {
+      return auditedJsonError(undefined, event, 429, 'RATE_LIMIT', 'Demasiadas solicitudes. Intenta nuevamente en unos minutos.')
+    }
+
+    // Dedupe/idempotencia: si existe una solicitud reciente para el email, reusar.
+    const latest = await repo.getLatestBillingIntentByEmail(email)
+    if (latest) {
+      const lastMs = Date.now() - new Date(latest.createdAt).getTime()
+      const within24h = lastMs >= 0 && lastMs < 24 * 60 * 60 * 1000
+      const sameIntent = latest.planCode === body.data.planCode && latest.billingCycle === body.data.billingCycle
+      const stillOpen = latest.status === 'new' || latest.status === 'contacted' || latest.status === 'approved'
+      if (within24h && sameIntent && stillOpen) {
+        return json(200, { id: latest.id, status: latest.status, deduped: true })
+      }
+    }
+    const now = new Date().toISOString()
+    const item: BillingIntent = {
+      id: randomUUID(),
+      email,
+      name: body.data.name?.trim(),
+      planCode: body.data.planCode,
+      billingCycle: body.data.billingCycle,
+      status: 'new',
+      source: body.data.source?.trim() ?? 'website',
+      createdAt: now,
+      updatedAt: now,
+    }
+    await repo.putBillingIntent(item)
+    return json(201, { id: item.id, status: item.status })
+  }
 
   if (seg[0] === 'v1' && seg[1] === 'admin') {
     const admin = resolvePlatformAdmin(event)

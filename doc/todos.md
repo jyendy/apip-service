@@ -19,6 +19,11 @@ Documento vivo para decisiones técnicas pendientes. Actualizar al cerrar ítems
 - [ ] **Migración**: tenants creados antes de `PLATFORM#REGISTRY` no aparecen en `GET /v1/admin/tenants` hasta ejecutar script de backfill del registro.
 - [ ] Grupo Cognito `apip-platform-admin` (o el definido en `PLATFORM_ADMIN_GROUP`) creado y asignación de usuarios root documentada.
 - [ ] (Opcional) `DELETE /v1/admin/tenants/{id}` con política de borrado en cascada o prohibición si hay datos.
+- [ ] **Onboarding requests (pricing → solicitud de alta)**:
+  - [ ] **Anti-spam**: rate limit por IP/email (TTL) y/o challenge (Turnstile/hCaptcha) en `/v1/public/onboarding-requests`.
+  - [ ] **Idempotencia/dedupe**: evitar duplicados por email en ventana corta; devolver el request existente si aplica.
+  - [ ] **SLA**: definir promesa de respuesta (p. ej. 24h hábiles) y reflejarla en UI + correos/manual.
+  - [ ] **Consentimiento**: checkbox obligatorio de Términos/Privacidad antes de enviar solicitud.
 
 ## Operacional (TMS, Real Estate, etc.)
 

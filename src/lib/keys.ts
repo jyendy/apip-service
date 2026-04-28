@@ -10,6 +10,18 @@ export const skInsightRule = (ruleId: string) => `INSIGHT_RULE#${ruleId}`
 
 export const skTenantRegistryEntry = (tenantId: string) => `TENANT#${tenantId}`
 
+/** Solicitudes de alta (onboarding) a nivel plataforma, ordenables por fecha. */
+export const skOnboardingRequest = (createdAt: string, requestId: string) =>
+  `ONBOARDING#${createdAt}#${requestId}`
+
+/** Índice por email para dedupe/lookup rápido (solicitudes de alta). */
+export const pkOnboardingByEmail = (email: string) => `PLATFORM#ONBOARDING_EMAIL#${email.toLowerCase()}`
+export const skOnboardingByEmail = (createdAt: string, requestId: string) => `REQ#${createdAt}#${requestId}`
+
+/** Rate limit simple para endpoints públicos (TTL). */
+export const pkPlatformRateLimit = () => 'PLATFORM#RATE_LIMIT'
+export const skOnboardingRateLimit = (kind: 'ip' | 'email', key: string) => `ONBOARDING#${kind}#${key}`
+
 export const pkTenant = (tenantId: string) => `TENANT#${tenantId}`
 
 export const skTenantMeta = () => 'META#TENANT'

@@ -8,6 +8,7 @@ import {
 import type {
   Asset,
   AssetFinancing,
+  BillingIntent,
   CostFact,
   ImportJob,
   Investor,
@@ -19,6 +20,7 @@ import type {
   Scenario,
   Simulation,
   Tenant,
+  TenantBilling,
   TmsCustomer,
   TmsDriver,
   TmsLocality,
@@ -56,6 +58,7 @@ const ENTITY = {
   TMS_RATE: 'TMS_RATE',
   TMS_ROUTE: 'TMS_ROUTE',
   SCENARIO: 'SCENARIO',
+  ONBOARDING_REQUEST: 'ONBOARDING_REQUEST',
 } as const
 
 type CoreItem = Record<string, unknown> & { PK: string; SK: string }
@@ -102,6 +105,7 @@ async function putTenantRegistryEntry(t: Tenant): Promise<void> {
         name: t.name,
         type: t.type,
         createdAt: t.createdAt,
+        billing: t.billing,
       },
     }),
   )
@@ -125,6 +129,7 @@ export async function listTenants(): Promise<Tenant[]> {
     name: String(row.name),
     type: row.type as Tenant['type'],
     createdAt: String(row.createdAt),
+    billing: row.billing as TenantBilling | undefined,
   }))
 }
 
@@ -138,6 +143,111 @@ export async function getTenant(tenantId: string): Promise<Tenant | null> {
   )
   if (!r.Item || (r.Item as CoreItem).entityType !== ENTITY.TENANT) return null
   return r.Item as unknown as Tenant
+}
+
+export async function putBillingIntent(intent: BillingIntent): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: {
+        PK: keys.pkPlatformRegistry(),
+        SK: keys.skOnboardingRequest(intent.createdAt, intent.id),
+        entityType: ENTITY.ONBOARDING_REQUEST,
+        ...intent,
+      },
+    }),
+  )
+  // Índice por email para lookup/dedupe.
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: {
+        PK: keys.pkOnboardingByEmail(intent.email),
+        SK: keys.skOnboardingByEmail(intent.createdAt, intent.id),
+        entityType: ENTITY.ONBOARDING_REQUEST,
+        requestId: intent.id,
+        email: intent.email,
+        createdAt: intent.createdAt,
+        status: intent.status,
+        planCode: intent.planCode,
+        billingCycle: intent.billingCycle,
+      },
+    }),
+  )
+}
+
+export async function listBillingIntents(): Promise<BillingIntent[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkPlatformRegistry(),
+        ':pfx': 'ONBOARDING#',
+      },
+      ScanIndexForward: false,
+    }),
+  )
+  return (r.Items ?? [])
+    .filter(x => (x as CoreItem).entityType === ENTITY.ONBOARDING_REQUEST)
+    .map(x => x as unknown as BillingIntent)
+}
+
+export async function getBillingIntent(intentId: string): Promise<BillingIntent | null> {
+  const items = await listBillingIntents()
+  return items.find(i => i.id === intentId) ?? null
+}
+
+export async function getLatestBillingIntentByEmail(email: string): Promise<BillingIntent | null> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkOnboardingByEmail(email),
+        ':pfx': 'REQ#',
+      },
+      ScanIndexForward: false,
+      Limit: 1,
+    }),
+  )
+  const first = (r.Items ?? [])[0] as (CoreItem & { requestId?: string }) | undefined
+  if (!first?.requestId) return null
+  return await getBillingIntent(String(first.requestId))
+}
+
+/**
+ * Rate limit simple (TTL): crea un token por `kind`+`key` si no existe.
+ * Si ya existe, se considera excedido. Útil para frenar spam.
+ */
+export async function tryAcquireOnboardingRateLimit(
+  kind: 'ip' | 'email',
+  key: string,
+  ttlSeconds: number,
+): Promise<boolean> {
+  const ddb = getDocumentClient()
+  const nowSec = Math.floor(Date.now() / 1000)
+  const expiresAt = nowSec + Math.max(10, ttlSeconds)
+  try {
+    await ddb.send(
+      new PutCommand({
+        TableName: tableName(),
+        Item: {
+          PK: keys.pkPlatformRateLimit(),
+          SK: keys.skOnboardingRateLimit(kind, key),
+          entityType: 'RATE_LIMIT',
+          expiresAt,
+        },
+        ConditionExpression: 'attribute_not_exists(PK)',
+      }),
+    )
+    return true
+  } catch {
+    return false
+  }
 }
 
 export async function putPortfolio(p: Portfolio): Promise<void> {

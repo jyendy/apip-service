@@ -4,11 +4,44 @@ import type { UserAssignment } from './rbac'
 
 export type TenantType = 'fund' | 'company' | 'family_office' | 'other'
 
+export type TenantBillingStatus = 'trial' | 'active' | 'past_due' | 'canceled'
+export type BillingPlanCode = 'starter' | 'pro' | 'enterprise'
+export type BillingCycle = 'monthly' | 'annual'
+
+/**
+ * Estado de facturación por tenant para operación manual en Stripe (MVP).
+ * `plan` se usa como bandera funcional en producto; ids Stripe son opcionales al inicio.
+ */
+export type TenantBilling = {
+  status: TenantBillingStatus
+  plan: `${BillingPlanCode}_${BillingCycle}`
+  stripeCustomerId?: string
+  stripeSubscriptionId?: string
+  updatedAt: string
+}
+
+/** Intención de compra/onboarding capturada desde website o sign-up antes de activar Stripe. */
+export type BillingIntent = {
+  id: string
+  email: string
+  name?: string
+  planCode: BillingPlanCode
+  billingCycle: BillingCycle
+  status: 'new' | 'contacted' | 'approved' | 'rejected' | 'onboarded'
+  notes?: string
+  processedAt?: string
+  processedBy?: string
+  source?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export type Tenant = {
   id: string
   name: string
   type: TenantType
   createdAt: string
+  billing?: TenantBilling
 }
 
 export type Portfolio = {

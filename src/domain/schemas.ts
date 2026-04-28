@@ -1,14 +1,43 @@
 import { z } from 'zod'
 
+export const billingPlanCodeSchema = z.enum(['starter', 'pro', 'enterprise'])
+export const billingCycleSchema = z.enum(['monthly', 'annual'])
+const tenantBillingStatusSchema = z.enum(['trial', 'active', 'past_due', 'canceled'])
+const tenantBillingPlanSchema = z
+  .string()
+  .regex(/^(starter|pro|enterprise)_(monthly|annual)$/)
+
+export const tenantBillingInputBody = z.object({
+  status: tenantBillingStatusSchema,
+  plan: tenantBillingPlanSchema,
+  stripeCustomerId: z.string().min(1).max(128).optional(),
+  stripeSubscriptionId: z.string().min(1).max(128).optional(),
+})
+
+export const createBillingIntentBody = z.object({
+  email: z.string().email(),
+  name: z.string().min(1).max(120).optional(),
+  planCode: billingPlanCodeSchema,
+  billingCycle: billingCycleSchema,
+  source: z.string().min(1).max(120).optional(),
+})
+
+export const patchBillingIntentBody = z.object({
+  status: z.enum(['new', 'contacted', 'approved', 'rejected', 'onboarded']).optional(),
+  notes: z.string().max(2000).optional(),
+})
+
 export const createTenantBody = z.object({
   name: z.string().min(1),
   type: z.enum(['fund', 'company', 'family_office', 'other']),
   id: z.string().min(1).optional(),
+  billing: tenantBillingInputBody.optional(),
 })
 
 export const patchTenantBody = z.object({
   name: z.string().min(1).optional(),
   type: z.enum(['fund', 'company', 'family_office', 'other']).optional(),
+  billing: tenantBillingInputBody.nullable().optional(),
 })
 
 export const createPortfolioBody = z.object({
