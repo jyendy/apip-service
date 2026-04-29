@@ -38,6 +38,12 @@ export const skRevenueFact = (assetId: string, factId: string) => `ASSET#${asset
 
 export const skCostFact = (assetId: string, factId: string) => `ASSET#${assetId}#COST#${factId}`
 
+export const skCapitalContribution = (assetId: string, contributionId: string) =>
+  `ASSET#${assetId}#CAPITAL#${contributionId}`
+
+export const skOccupancyRecord = (assetId: string, month: string, recordId: string) =>
+  `ASSET#${assetId}#OCC#${month}#${recordId}`
+
 /** Un financiamiento por activo (MVP): un solo ítem bajo el tenant. */
 export const skAssetFinancing = (assetId: string) => `ASSET#${assetId}#FINANCING`
 

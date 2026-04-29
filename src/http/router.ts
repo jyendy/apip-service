@@ -14,6 +14,7 @@ import {
   createProjectBody,
   createScenarioBody,
   createBillingIntentBody,
+  capitalContributionBody,
   createTenantBody,
   createTmsCustomerBody,
   createTmsDriverBody,
@@ -29,6 +30,7 @@ import {
   importAssetsBody,
   investorLedgerEntryBody,
   listQuery,
+  occupancyRecordBody,
   patchAccessRoleBody,
   patchAccessUserBody,
   patchAdminAccessUserBody,
@@ -49,6 +51,8 @@ import {
   putAssetCashFlowsBody,
   putAssetFinancingBody,
   putProjectInvestorAllocationsBody,
+  realEstateCostFactBody,
+  realEstateRevenueFactBody,
   simulationBody,
   tmsTripCostBody,
   tmsTripRevenueBody,
@@ -97,10 +101,12 @@ import {
 import type {
   AccessRole,
   Asset,
+  CapitalContribution,
   CostFact,
   ImportJob,
   Investor,
   InvestorLedgerEntry,
+  OccupancyRecord,
   Portfolio,
   Project,
   Scenario,
@@ -166,6 +172,25 @@ async function ensureTenant(
   const t = await repo.getTenant(tenantId)
   if (!t) return auditedJsonError(ctx, event, 404, 'TENANT_NOT_FOUND', 'Tenant no existe o no está inicializado')
   return null
+}
+
+function requireRealEstateAssetType(
+  event: APIGatewayProxyEventV2,
+  ctx: { tenantId: string; subject?: string },
+  asset: Asset,
+): APIGatewayProxyResultV2 | null {
+  if (asset.type === 'real_estate') return null
+  return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Esta operación solo aplica a activos de tipo real_estate')
+}
+
+async function loadAssetFinancialPackage(tenantId: string, asset: Asset) {
+  const [rev, cost, fin, contributions] = await Promise.all([
+    repo.listRevenueFacts(tenantId, asset.id),
+    repo.listCostFacts(tenantId, asset.id),
+    repo.getFinancing(tenantId, asset.id),
+    repo.listCapitalContributions(tenantId, asset.id),
+  ])
+  return computeAssetFinancialPackage(asset, rev, cost, fin, contributions)
 }
 
 async function routeAdmin(
@@ -652,6 +677,64 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
       }
     }
 
+    if (seg[0] === 'v1' && seg[1] === 'revenue-facts' && seg.length === 2) {
+      if (method === 'POST') {
+        const body = realEstateRevenueFactBody.safeParse(parseBody(event))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const a = await repo.getAsset(ctx.tenantId, body.data.assetId)
+        if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        const deniedW = requireRbac(ctx, event, rbacState, 'asset:write', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedW) return deniedW
+        const typeErr = requireRealEstateAssetType(event, ctx, a)
+        if (typeErr) return typeErr
+        const now = new Date().toISOString()
+        const rf: RevenueFact = {
+          id: newId.fact(),
+          tenantId: ctx.tenantId,
+          assetId: body.data.assetId,
+          amount: body.data.amount,
+          date: body.data.date,
+          category: body.data.category,
+          source: 'real_estate',
+          createdAt: now,
+        }
+        await repo.putRevenueFact(rf)
+        return finalizeAudit(ctx, event, json(201, rf))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'cost-facts' && seg.length === 2) {
+      if (method === 'POST') {
+        const body = realEstateCostFactBody.safeParse(parseBody(event))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        const a = await repo.getAsset(ctx.tenantId, body.data.assetId)
+        if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+        const deniedW = requireRbac(ctx, event, rbacState, 'asset:write', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedW) return deniedW
+        const typeErr = requireRealEstateAssetType(event, ctx, a)
+        if (typeErr) return typeErr
+        const now = new Date().toISOString()
+        const cf: CostFact = {
+          id: newId.fact(),
+          tenantId: ctx.tenantId,
+          assetId: body.data.assetId,
+          amount: body.data.amount,
+          date: body.data.date,
+          category: body.data.category,
+          source: 'real_estate',
+          createdAt: now,
+        }
+        await repo.putCostFact(cf)
+        return finalizeAudit(ctx, event, json(201, cf))
+      }
+    }
+
     // --- /v1/assets ---
     if (seg[0] === 'v1' && seg[1] === 'assets' && seg.length === 2) {
       if (method === 'GET') {
@@ -760,10 +843,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const assets = await repo.listAssetsByTenant(ctx.tenantId, { type })
         const packages = []
         for (const asset of assets) {
-          const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
-          const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
-          const fin = await repo.getFinancing(ctx.tenantId, asset.id)
-          packages.push(computeAssetFinancialPackage(asset, rev, cost, fin))
+          packages.push(await loadAssetFinancialPackage(ctx.tenantId, asset))
         }
         return finalizeAudit(ctx, event, json(200, aggregateFinancialPackages('asset_type', type, packages)))
       }
@@ -914,10 +994,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           projectId: a.projectId,
         })
         if (deniedF) return deniedF
-        const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
-        const cost = await repo.listCostFacts(ctx.tenantId, assetId)
-        const fin = await repo.getFinancing(ctx.tenantId, assetId)
-        const pkg = computeAssetFinancialPackage(a, rev, cost, fin)
+        const pkg = await loadAssetFinancialPackage(ctx.tenantId, a)
         const rules = await insightRulesRepo.listInsightRulesForTenant(ctx.tenantId)
         const insightInput = buildFinancialInsightInput(a, pkg)
         const insightsAsset = generateFinancialInsights(rules, insightInput, 'asset')
@@ -945,10 +1022,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           projectId: a.projectId,
         })
         if (deniedF) return deniedF
-        const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
-        const cost = await repo.listCostFacts(ctx.tenantId, assetId)
-        const fin = await repo.getFinancing(ctx.tenantId, assetId)
-        const pkg = computeAssetFinancialPackage(a, rev, cost, fin)
+        const pkg = await loadAssetFinancialPackage(ctx.tenantId, a)
         return finalizeAudit(ctx, event, json(200, { assetId, cashFlow: pkg.metrics.asset.cashFlow }))
       }
     }
@@ -966,6 +1040,93 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const revenueFacts = await repo.listRevenueFacts(ctx.tenantId, assetId)
         const costFacts = await repo.listCostFacts(ctx.tenantId, assetId)
         return finalizeAudit(ctx, event, json(200, { assetId, revenueFacts, costFacts }))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'assets' && seg[3] === 'capital-contributions' && seg.length === 4) {
+      const assetId = seg[2]
+      const a = await repo.getAsset(ctx.tenantId, assetId)
+      if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+      const typeErr = requireRealEstateAssetType(event, ctx, a)
+      if (typeErr) return typeErr
+      if (method === 'GET') {
+        const deniedF = requireRbac(ctx, event, rbacState, 'financial:read', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedF) return deniedF
+        const items = await repo.listCapitalContributions(ctx.tenantId, assetId)
+        items.sort((x, y) => x.date.localeCompare(y.date))
+        return finalizeAudit(ctx, event, json(200, { items }))
+      }
+      if (method === 'POST') {
+        const deniedW = requireRbac(ctx, event, rbacState, 'asset:write', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedW) return deniedW
+        const body = capitalContributionBody.safeParse(parseBody(event))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (body.data.investorId) {
+          const inv = await repo.getInvestor(ctx.tenantId, body.data.investorId)
+          if (!inv) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'investorId no existe')
+        }
+        const now = new Date().toISOString()
+        const item: CapitalContribution = {
+          id: newId.capital(),
+          tenantId: ctx.tenantId,
+          assetId,
+          amount: body.data.amount,
+          date: body.data.date,
+          reason: body.data.reason,
+          investorId: body.data.investorId,
+          createdAt: now,
+        }
+        await repo.putCapitalContribution(item)
+        return finalizeAudit(ctx, event, json(201, item))
+      }
+    }
+
+    if (seg[0] === 'v1' && seg[1] === 'assets' && seg[3] === 'occupancy' && seg.length === 4) {
+      const assetId = seg[2]
+      const a = await repo.getAsset(ctx.tenantId, assetId)
+      if (!a) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
+      const typeErr = requireRealEstateAssetType(event, ctx, a)
+      if (typeErr) return typeErr
+      if (method === 'GET') {
+        const deniedF = requireRbac(ctx, event, rbacState, 'financial:read', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedF) return deniedF
+        const items = await repo.listOccupancyRecords(ctx.tenantId, assetId)
+        items.sort((x, y) => x.month.localeCompare(y.month))
+        return finalizeAudit(ctx, event, json(200, { items }))
+      }
+      if (method === 'POST') {
+        const deniedW = requireRbac(ctx, event, rbacState, 'asset:write', {
+          portfolioId: a.portfolioId,
+          projectId: a.projectId,
+        })
+        if (deniedW) return deniedW
+        const body = occupancyRecordBody.safeParse(parseBody(event))
+        if (!body.success) return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+        if (body.data.occupiedDays > body.data.availableDays) {
+          return auditedJsonError(ctx, event, 400, 'VALIDATION', 'occupiedDays no puede ser mayor a availableDays')
+        }
+        const now = new Date().toISOString()
+        const item: OccupancyRecord = {
+          id: newId.fact(),
+          tenantId: ctx.tenantId,
+          assetId,
+          month: body.data.month,
+          occupiedDays: body.data.occupiedDays,
+          availableDays: body.data.availableDays,
+          createdAt: now,
+          updatedAt: now,
+        }
+        await repo.putOccupancyRecord(item)
+        return finalizeAudit(ctx, event, json(201, item))
       }
     }
 
@@ -1014,10 +1175,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
           await repo.putRevenueFact(rf)
           await repo.putCostFact(cf)
         }
-        const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
-        const cost = await repo.listCostFacts(ctx.tenantId, assetId)
-        const fin = await repo.getFinancing(ctx.tenantId, assetId)
-        const pkg = computeAssetFinancialPackage(a, rev, cost, fin)
+        const pkg = await loadAssetFinancialPackage(ctx.tenantId, a)
         return finalizeAudit(ctx, event, json(200, { ...pkg, updatedPeriods: body.data.periods.length }))
       }
     }
@@ -1247,10 +1405,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const a = await repo.listAssetsByTenant(ctx.tenantId, { portfolioId })
         const packages = []
         for (const asset of a) {
-          const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
-          const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
-          const fin = await repo.getFinancing(ctx.tenantId, asset.id)
-          packages.push(computeAssetFinancialPackage(asset, rev, cost, fin))
+          packages.push(await loadAssetFinancialPackage(ctx.tenantId, asset))
         }
         return finalizeAudit(ctx, event, json(200, aggregateFinancialPackages('portfolio', portfolioId, packages)))
       }
@@ -1396,10 +1551,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         const a = loaded.assets
         const packages = []
         for (const asset of a) {
-          const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
-          const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
-          const fin = await repo.getFinancing(ctx.tenantId, asset.id)
-          packages.push(computeAssetFinancialPackage(asset, rev, cost, fin))
+          packages.push(await loadAssetFinancialPackage(ctx.tenantId, asset))
         }
         return finalizeAudit(
           ctx,

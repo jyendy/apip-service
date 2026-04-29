@@ -98,6 +98,13 @@ export type AssetFinancialModel = {
   costGrowthRate?: number
 }
 
+export type AssetRealEstateMetadata = {
+  propertyType?: 'residential' | 'commercial' | 'short_stay'
+  rentModel?: 'long_term' | 'short_term'
+  units?: number
+  notes?: string
+}
+
 export type Asset = {
   id: string
   tenantId: string
@@ -111,7 +118,7 @@ export type Asset = {
   initialInvestment: number
   currency: string
   status: AssetStatus
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown> & AssetRealEstateMetadata
   /** Supuestos de simulación cuando aún no hay o hay pocos hechos reales. */
   financialModel?: AssetFinancialModel
   createdAt: string
@@ -131,7 +138,7 @@ export type CapitalEvent = {
   createdAt: string
 }
 
-export type FactSource = 'manual' | 'import' | 'api'
+export type FactSource = 'manual' | 'import' | 'api' | 'real_estate'
 
 /** Hechos de ingreso; `category` libre (p. ej. tms, monthly). */
 export type RevenueFact = {
@@ -157,6 +164,28 @@ export type CostFact = {
   source: FactSource
   createdAt: string
   sourceRef?: { kind: 'tms_trip' | 'tms_order'; id: string }
+}
+
+export type CapitalContribution = {
+  id: string
+  tenantId: string
+  assetId: string
+  amount: number
+  date: string
+  reason?: string
+  investorId?: string
+  createdAt: string
+}
+
+export type OccupancyRecord = {
+  id: string
+  tenantId: string
+  assetId: string
+  month: string
+  occupiedDays: number
+  availableDays: number
+  createdAt: string
+  updatedAt: string
 }
 
 export type InvestorRole = 'limited_partner' | 'general_partner' | 'advisor' | 'stakeholder' | 'other'
@@ -410,6 +439,13 @@ export type AssetFinancialMetricsPackage = {
   insights?: {
     asset: FinancialInsight[]
     equity: FinancialInsight[] | null
+  }
+  projectionVsReality?: {
+    projectedRevenue: number
+    actualRevenue: number
+    deltaRevenue: number
+    projectedROI: number
+    actualROI: number
   }
 }
 

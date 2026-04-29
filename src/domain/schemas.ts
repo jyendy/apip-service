@@ -70,6 +70,15 @@ const financialModelSchema = z
   })
   .optional()
 
+const realEstateMetadataSchema = z
+  .object({
+    propertyType: z.enum(['residential', 'commercial', 'short_stay']).optional(),
+    rentModel: z.enum(['long_term', 'short_term']).optional(),
+    units: z.number().int().positive().optional(),
+    notes: z.string().max(5000).optional(),
+  })
+  .passthrough()
+
 export const createAssetBody = z.object({
   portfolioId: z.string().min(1),
   projectId: z.string().min(1),
@@ -81,11 +90,40 @@ export const createAssetBody = z.object({
   initialInvestment: z.number(),
   currency: z.string().length(3).default('USD'),
   status: z.enum(['active', 'inactive', 'maintenance', 'sold']).optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
+  metadata: realEstateMetadataSchema.optional(),
   financialModel: financialModelSchema,
 })
 
 export const patchAssetBody = createAssetBody.partial().omit({ portfolioId: true, projectId: true })
+
+export const realEstateRevenueFactBody = z.object({
+  assetId: z.string().min(1),
+  amount: z.number().positive(),
+  date: z.string().datetime(),
+  category: z.enum(['rent', 'other_income']).default('rent'),
+  source: z.literal('real_estate').optional(),
+})
+
+export const realEstateCostFactBody = z.object({
+  assetId: z.string().min(1),
+  amount: z.number().positive(),
+  date: z.string().datetime(),
+  category: z.enum(['maintenance', 'utilities', 'admin', 'cleaning', 'taxes', 'other']),
+  source: z.literal('real_estate').optional(),
+})
+
+export const capitalContributionBody = z.object({
+  amount: z.number().positive(),
+  date: z.string().datetime(),
+  reason: z.string().max(5000).optional(),
+  investorId: z.string().min(1).optional(),
+})
+
+export const occupancyRecordBody = z.object({
+  month: z.string().regex(/^\d{4}-\d{2}$/),
+  occupiedDays: z.number().int().nonnegative(),
+  availableDays: z.number().int().positive(),
+})
 
 export const createScenarioBody = z.object({
   projectId: z.string().min(1),

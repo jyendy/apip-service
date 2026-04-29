@@ -5,6 +5,7 @@ import type {
   AssetFinancialMetricsPackage,
   AssetFinancing,
   AssetMetricsComputed,
+  CapitalContribution,
   CashFlowPoint,
   CostFact,
   MetricsCoverage,
@@ -26,6 +27,15 @@ function monthKey(isoDate: string): string {
   const y = d.getUTCFullYear()
   const m = d.getUTCMonth() + 1
   return `${y}-${String(m).padStart(2, '0')}`
+}
+
+function sumCapitalContributionsByMonth(contributions: CapitalContribution[]): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const c of contributions) {
+    const k = monthKey(c.date)
+    out.set(k, (out.get(k) ?? 0) + c.amount)
+  }
+  return out
 }
 
 function addMonthsYm(ym: string, delta: number): string {
@@ -320,6 +330,7 @@ export function computeAssetFinancialPackage(
   revenue: RevenueFact[],
   costs: CostFact[],
   financing: AssetFinancing | null,
+  contributions: CapitalContribution[] = [],
 ): AssetFinancialMetricsPackage {
   const assetM = computeAssetMetrics(asset, revenue, costs)
   auditLog({
@@ -365,12 +376,36 @@ export function computeAssetFinancialPackage(
     timestamp: new Date().toISOString(),
     npvAtIrr: irrAssetDiag.npvAtRate,
   })
+  const projectionVsReality = (() => {
+    let projectedRevenue = 0
+    let actualRevenue = 0
+    let projectedNet = 0
+    let actualNet = 0
+    for (const p of assetM.cashFlow) {
+      if (p.mode === 'ACTUAL') {
+        actualRevenue += p.revenue
+        actualNet += p.netCashFlow
+      } else {
+        projectedRevenue += p.revenue
+        projectedNet += p.netCashFlow
+      }
+    }
+    return {
+      projectedRevenue,
+      actualRevenue,
+      deltaRevenue: actualRevenue - projectedRevenue,
+      projectedROI: simpleRoiPercent(projectedNet, asset.initialInvestment),
+      actualROI: simpleRoiPercent(actualNet, asset.initialInvestment),
+    }
+  })()
+
   if (!financing) {
     return {
       assetId: asset.id,
       calculationVersion: assetM.calculationVersion,
       metrics: { asset: assetM, equity: null },
       financing: null,
+      projectionVsReality,
     }
   }
 
@@ -388,6 +423,7 @@ export function computeAssetFinancialPackage(
   const acqYm = monthKey(asset.acquisitionDate)
   const offset = financingStartOffsetMonths(acqYm, financing.startDate)
   const debtByMonth = buildDebtServiceByMonth(assetM.cashFlow.length, offset, schedule)
+  const contributionsByMonth = sumCapitalContributionsByMonth(contributions)
 
   const equityNets: number[] = []
   const equityFlow: CashFlowPoint[] = []
@@ -395,8 +431,9 @@ export function computeAssetFinancialPackage(
   for (let i = 0; i < assetM.cashFlow.length; i++) {
     const p = assetM.cashFlow[i]!
     const d = debtByMonth[i] ?? 0
+    const c = contributionsByMonth.get(monthKey(p.date)) ?? 0
     const opNet = p.netCashFlow
-    const eqNet = opNet - d
+    const eqNet = opNet - d - c
     equityNets.push(eqNet)
     cumEq += eqNet
     equityFlow.push({
@@ -485,5 +522,6 @@ export function computeAssetFinancialPackage(
     calculationVersion: assetM.calculationVersion,
     metrics: { asset: assetM, equity: equityM },
     financing: financingPublicSnapshot(financing, schedule),
+    projectionVsReality,
   }
 }

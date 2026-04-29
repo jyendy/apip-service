@@ -9,10 +9,12 @@ import type {
   Asset,
   AssetFinancing,
   BillingIntent,
+  CapitalContribution,
   CostFact,
   ImportJob,
   Investor,
   InvestorLedgerEntry,
+  OccupancyRecord,
   Portfolio,
   Project,
   ProjectInvestorAllocation,
@@ -59,6 +61,8 @@ const ENTITY = {
   TMS_ROUTE: 'TMS_ROUTE',
   SCENARIO: 'SCENARIO',
   ONBOARDING_REQUEST: 'ONBOARDING_REQUEST',
+  CAPITAL_CONTRIBUTION: 'CAPITAL_CONTRIBUTION',
+  OCCUPANCY_RECORD: 'OCCUPANCY_RECORD',
 } as const
 
 type CoreItem = Record<string, unknown> & { PK: string; SK: string }
@@ -481,6 +485,62 @@ export async function putCostFact(f: CostFact): Promise<void> {
       }),
     }),
   )
+}
+
+export async function putCapitalContribution(c: CapitalContribution): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(c.tenantId, keys.skCapitalContribution(c.assetId, c.id), {
+        entityType: ENTITY.CAPITAL_CONTRIBUTION,
+        ...c,
+      }),
+    }),
+  )
+}
+
+export async function listCapitalContributions(tenantId: string, assetId: string): Promise<CapitalContribution[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': `ASSET#${assetId}#CAPITAL#`,
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as CapitalContribution[]
+}
+
+export async function putOccupancyRecord(o: OccupancyRecord): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: baseItem(o.tenantId, keys.skOccupancyRecord(o.assetId, o.month, o.id), {
+        entityType: ENTITY.OCCUPANCY_RECORD,
+        ...o,
+      }),
+    }),
+  )
+}
+
+export async function listOccupancyRecords(tenantId: string, assetId: string): Promise<OccupancyRecord[]> {
+  const ddb = getDocumentClient()
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :pfx)',
+      ExpressionAttributeValues: {
+        ':pk': keys.pkTenant(tenantId),
+        ':pfx': `ASSET#${assetId}#OCC#`,
+      },
+    }),
+  )
+  return (r.Items ?? []) as unknown as OccupancyRecord[]
 }
 
 export async function deleteFactsForAsset(tenantId: string, assetId: string): Promise<void> {
