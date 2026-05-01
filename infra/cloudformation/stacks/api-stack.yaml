@@ -22,7 +22,10 @@ Parameters:
   DocumentsBucketName:
     Type: String
     Default: ''
-    Description: S3 bucket for documents (pre-signed PUT/GET). Dejar vacío hasta crear el bucket.
+    Description: >-
+      Nombre de un bucket S3 existente para documentos (pre-signed PUT/GET). Si se deja vacío, el stack crea
+      un bucket dedicado `ApipDocumentsBucket`, aplica política al rol AWSAPIPLambdaExecutionRole y configura
+      APIP_DOCUMENTS_BUCKET_NAME en la Lambda.
   PlatformAdminGroupNames:
     Type: String
     Default: 'apip-platform-admin,admin'
@@ -35,6 +38,8 @@ Conditions:
   HasApiCustomDomainCertificateArn: !Not [!Equals [!Ref ApiCustomDomainCertificateArn, '']]
   HasApiCustomDomain:
     !And [!Condition HasApiCustomDomainName, !Condition HasApiCustomDomainCertificateArn]
+  # Bucket gestionado por este stack (nombre de bucket externo no informado).
+  CreateManagedDocumentsBucket: !Equals [!Ref DocumentsBucketName, '']
 
 Resources:
   ApipApiFunction:
@@ -60,12 +65,52 @@ Resources:
           EVENT_BUS_NAME: default
           ALLOW_DEV_TENANT_HEADER: 'false'
           PLATFORM_ADMIN_GROUP: !Ref PlatformAdminGroupNames
-          APIP_DOCUMENTS_BUCKET_NAME: !Ref DocumentsBucketName
+          APIP_DOCUMENTS_BUCKET_NAME: !If
+            - CreateManagedDocumentsBucket
+            - !Ref ApipDocumentsBucket
+            - !Ref DocumentsBucketName
           COGNITO_USER_POOL_ID:
             Fn::ImportValue: apip-cognito-user-pool-id
       Code:
         S3Bucket: !Ref LambdaCodeBucket
         S3Key: !Ref LambdaCodeKey
+
+  # Documentos: bucket privado + política para que la Lambda (presign + HeadObject en complete) pueda operar
+  # sin ampliar AWSAPIPLambdaExecutionPolicy con ARNs desconocidos.
+  ApipDocumentsBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateManagedDocumentsBucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  ApipDocumentsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateManagedDocumentsBucket
+    Properties:
+      Bucket: !Ref ApipDocumentsBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowLambdaExecutionRoleObjectAccess
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:role/AWSAPIPLambdaExecutionRole'
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:HeadObject
+            Resource: !Sub '${ApipDocumentsBucket.Arn}/*'
 
   ApipHttpApi:
     Type: AWS::ApiGatewayV2::Api
@@ -1205,6 +1250,12 @@ Resources:
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApipHttpApi}/*/*/*'
 
 Outputs:
+  DocumentsBucketNameOut:
+    Condition: CreateManagedDocumentsBucket
+    Description: Bucket S3 creado por el stack para documentos (pre-signed desde Lambda).
+    Value: !Ref ApipDocumentsBucket
+    Export:
+      Name: apip-documents-bucket-name
   HttpApiUrl:
     Description: HTTP API base URL
     Value: !GetAtt ApipHttpApi.ApiEndpoint
