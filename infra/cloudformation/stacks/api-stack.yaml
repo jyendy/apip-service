@@ -75,8 +75,8 @@ Resources:
         S3Bucket: !Ref LambdaCodeBucket
         S3Key: !Ref LambdaCodeKey
 
-  # Documentos: bucket privado + política para que la Lambda (presign + HeadObject en complete) pueda operar
-  # sin ampliar AWSAPIPLambdaExecutionPolicy con ARNs desconocidos.
+  # Documentos: bucket privado + política para que la Lambda (presign PUT/GET y comprobación en complete) pueda operar
+  # sin ampliar AWSAPIPLambdaExecutionPolicy. En IAM, HeadObject se autoriza con s3:GetObject (no existe s3:HeadObject).
   ApipDocumentsBucket:
     Type: AWS::S3::Bucket
     Condition: CreateManagedDocumentsBucket
@@ -109,7 +109,6 @@ Resources:
             Action:
               - s3:GetObject
               - s3:PutObject
-              - s3:HeadObject
             Resource: !Sub '${ApipDocumentsBucket.Arn}/*'
 
   ApipHttpApi:
