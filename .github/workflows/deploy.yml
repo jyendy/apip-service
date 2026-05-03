@@ -1,0 +1,242 @@
+---
+# Ola 1: data, messaging, artifacts, cognito (paralelo). Build Lambda → S3. Ola 2: API.
+# Cuenta AWS: deploy/env/aws-apip-{dev|stg|prd}.env (variable AWS_ACCOUNT_ID).
+# GitHub Environment: solo AWS_REGION (Cognito sale del stack apip-cognito + ImportValue).
+
+name: Deploy AWS (apip-service)
+
+on:
+  push:
+    branches: [develop, staging, main]
+
+concurrency:
+  group: deploy-apip-service-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  validate-workflow:
+    name: Validate workflow YAML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install yamllint
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install yamllint
+      - name: Lint workflow yaml
+        run: |
+          yamllint -d '{extends: default, rules: {truthy: disable, line-length: disable}}' .github/workflows/deploy.yml
+
+  qa-build:
+    name: QA build (lint, typecheck, test, build)
+    runs-on: ubuntu-latest
+    needs: [validate-workflow]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm run test
+      - name: Build
+        run: npm run build
+
+  resolve-target:
+    name: Resolve target account/env
+    runs-on: ubuntu-latest
+    needs: [qa-build]
+    outputs:
+      env_short: ${{ steps.target.outputs.env_short }}
+      aws_account_id: ${{ steps.target.outputs.aws_account_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Map branch → env and load deploy/env/*.env
+        id: target
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+            ENV_SHORT="prd"
+          elif [[ "${GITHUB_REF_NAME}" == "staging" ]]; then
+            ENV_SHORT="stg"
+          else
+            ENV_SHORT="dev"
+          fi
+          ENV_FILE="deploy/env/aws-apip-${ENV_SHORT}.env"
+          set -a
+          # shellcheck disable=SC1090
+          source "${ENV_FILE}"
+          set +a
+          echo "env_short=${ENV_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "aws_account_id=${AWS_ACCOUNT_ID}" >> "$GITHUB_OUTPUT"
+
+  wave1-data:
+    name: Stack data (DynamoDB)
+    needs: [resolve-target]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-target.outputs.env_short == 'prd' && 'prd' || (needs.resolve-target.outputs.env_short == 'stg' && 'stg' || 'dev') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ needs.resolve-target.outputs.aws_account_id }}:role/AWSAPIPDeployExecutionRole
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Deploy data-stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name apip-data \
+            --template-file infra/cloudformation/stacks/data-stack.yaml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --role-arn arn:aws:iam::${{ needs.resolve-target.outputs.aws_account_id }}:role/AWSAPIPCloudFormationExecutionRole \
+            --no-fail-on-empty-changeset
+
+  wave1-messaging:
+    name: Stack messaging (EventBridge)
+    needs: [resolve-target]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-target.outputs.env_short == 'prd' && 'prd' || (needs.resolve-target.outputs.env_short == 'stg' && 'stg' || 'dev') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ needs.resolve-target.outputs.aws_account_id }}:role/AWSAPIPDeployExecutionRole
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Deploy messaging-stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name apip-messaging \
+            --template-file infra/cloudformation/stacks/messaging-stack.yaml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --role-arn arn:aws:iam::${{ needs.resolve-target.outputs.aws_account_id }}:role/AWSAPIPCloudFormationExecutionRole \
+            --no-fail-on-empty-changeset
+
+  wave1-artifacts:
+    name: Stack artifacts (S3)
+    needs: [resolve-target]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-target.outputs.env_short == 'prd' && 'prd' || (needs.resolve-target.outputs.env_short == 'stg' && 'stg' || 'dev') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ needs.resolve-target.outputs.aws_account_id }}:role/AWSAPIPDeployExecutionRole
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Deploy artifacts-stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name apip-artifacts \
+            --template-file infra/cloudformation/stacks/artifacts-stack.yaml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --role-arn arn:aws:iam::${{ needs.resolve-target.outputs.aws_account_id }}:role/AWSAPIPCloudFormationExecutionRole \
+            --no-fail-on-empty-changeset
+
+  wave1-cognito:
+    name: Stack Cognito (User Pool + client)
+    needs: [resolve-target]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-target.outputs.env_short == 'prd' && 'prd' || (needs.resolve-target.outputs.env_short == 'stg' && 'stg' || 'dev') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ needs.resolve-target.outputs.aws_account_id }}:role/AWSAPIPDeployExecutionRole
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Deploy cognito-stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name apip-cognito \
+            --template-file infra/cloudformation/stacks/cognito-stack.yaml \
+            --role-arn arn:aws:iam::${{ needs.resolve-target.outputs.aws_account_id }}:role/AWSAPIPCloudFormationExecutionRole \
+            --no-fail-on-empty-changeset
+
+  build-lambda:
+    name: Build and upload Lambda package
+    needs: [resolve-target, wave1-artifacts]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-target.outputs.env_short == 'prd' && 'prd' || (needs.resolve-target.outputs.env_short == 'stg' && 'stg' || 'dev') }}
+    outputs:
+      lambda_code_bucket: ${{ steps.meta.outputs.bucket }}
+      lambda_code_key: ${{ steps.meta.outputs.key }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ needs.resolve-target.outputs.aws_account_id }}:role/AWSAPIPDeployExecutionRole
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Get artifacts bucket name
+        id: artifacts
+        run: |
+          BUCKET=$(aws cloudformation describe-stacks --stack-name apip-artifacts \
+            --query "Stacks[0].Outputs[?OutputKey=='ArtifactsBucketName'].OutputValue" \
+            --output text)
+          echo "bucket=${BUCKET}" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install and compile
+        run: |
+          npm ci
+          npm run build
+      - name: Prepare production package
+        run: |
+          npm ci --omit=dev
+      - name: Zip lambda artifact (handler at zip root)
+        run: |
+          cd dist
+          cp -r ../node_modules .
+          zip -qr ../apip-api.zip .
+          cd ..
+      - name: Upload to S3 and export coordinates
+        id: meta
+        env:
+          BUCKET: ${{ steps.artifacts.outputs.bucket }}
+        run: |
+          KEY="lambda/apip-api-${{ github.sha }}.zip"
+          aws s3 cp apip-api.zip "s3://${BUCKET}/${KEY}"
+          echo "bucket=${BUCKET}" >> "$GITHUB_OUTPUT"
+          echo "key=${KEY}" >> "$GITHUB_OUTPUT"
+
+  wave2-api:
+    name: Stack API (Lambda + HTTP API)
+    needs:
+      - resolve-target
+      - wave1-data
+      - wave1-messaging
+      - wave1-artifacts
+      - wave1-cognito
+      - build-lambda
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-target.outputs.env_short == 'prd' && 'prd' || (needs.resolve-target.outputs.env_short == 'stg' && 'stg' || 'dev') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ needs.resolve-target.outputs.aws_account_id }}:role/AWSAPIPDeployExecutionRole
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Deploy api-stack
+        run: |
+          EXTRA_PARAMS=""
+          if [[ -n "${{ vars.API_CUSTOM_DOMAIN_NAME }}" && -n "${{ vars.API_CUSTOM_DOMAIN_CERT_ARN }}" ]]; then
+            EXTRA_PARAMS="ApiCustomDomainName=${{ vars.API_CUSTOM_DOMAIN_NAME }} ApiCustomDomainCertificateArn=${{ vars.API_CUSTOM_DOMAIN_CERT_ARN }}"
+          fi
+          aws cloudformation deploy \
+            --stack-name apip-api \
+            --template-file infra/cloudformation/stacks/api-stack.yaml \
+            --parameter-overrides \
+              LambdaCodeBucket=${{ needs.build-lambda.outputs.lambda_code_bucket }} \
+              LambdaCodeKey=${{ needs.build-lambda.outputs.lambda_code_key }} \
+              ${EXTRA_PARAMS} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --role-arn arn:aws:iam::${{ needs.resolve-target.outputs.aws_account_id }}:role/AWSAPIPCloudFormationExecutionRole \
+            --no-fail-on-empty-changeset

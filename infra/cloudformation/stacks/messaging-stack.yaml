@@ -1,0 +1,22 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  APIP messaging (EventBridge domain bus). No dependency on data or API stacks.
+  Fixed bus name per account.
+
+Resources:
+  DomainEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: apip-domain
+
+Outputs:
+  EventBusName:
+    Description: Event bus name for PutEvents and rules
+    Value: !Ref DomainEventBus
+    Export:
+      Name: apip-event-bus-name
+  EventBusArn:
+    Description: Event bus ARN (IAM policies)
+    Value: !GetAtt DomainEventBus.Arn
+    Export:
+      Name: apip-event-bus-arn

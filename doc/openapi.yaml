@@ -1,0 +1,573 @@
+openapi: 3.0.3
+info:
+  title: APIP API
+  version: 1.0.0
+  description: |
+    Contrato REST de apip-service. El tenant se resuelve desde JWT (no va en path).
+    Ver también [api-contract.md](./api-contract.md), [financial-engine.md](./financial-engine.md) y [dynamodb-model.md](./dynamodb-model.md).
+servers:
+  - url: https://{host}
+    variables:
+      host:
+        default: api.example.com
+        description: API HTTP (API Gateway) o dominio custom
+
+components:
+  securitySchemes:
+    CognitoJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token de Cognito (App Client vinculado al User Pool).
+
+  schemas:
+    ErrorBody:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: {}
+
+    AssetFinancialModel:
+      type: object
+      required: [estimatedMonthlyRevenue, estimatedMonthlyCost, durationMonths]
+      properties:
+        estimatedMonthlyRevenue: { type: number, minimum: 0 }
+        estimatedMonthlyCost: { type: number, minimum: 0 }
+        durationMonths: { type: integer, minimum: 1, maximum: 600 }
+        revenueGrowthRate: { type: number }
+        costGrowthRate: { type: number }
+
+    CreateAssetRequest:
+      type: object
+      required: [portfolioId, projectId, name, type, acquisitionDate, initialInvestment]
+      properties:
+        portfolioId: { type: string }
+        projectId: { type: string }
+        name: { type: string }
+        type:
+          type: string
+          enum: [transport, real_estate, machinery, energy, other]
+        acquisitionDate: { type: string, format: date-time }
+        initialInvestment: { type: number }
+        currency: { type: string, default: USD, minLength: 3, maxLength: 3 }
+        status:
+          type: string
+          enum: [active, inactive, maintenance, sold]
+        metadata:
+          type: object
+          additionalProperties: true
+        financialModel:
+          $ref: '#/components/schemas/AssetFinancialModel'
+
+    PutAssetCashFlowsRequest:
+      type: object
+      required: [periods]
+      properties:
+        periods:
+          type: array
+          items:
+            type: object
+            required: [period, revenue, cost]
+            properties:
+              period:
+                type: string
+                pattern: '^\\d{4}-\\d{2}$'
+              revenue: { type: number, minimum: 0 }
+              cost: { type: number, minimum: 0 }
+              source:
+                type: string
+                enum: [manual, tms, erp, import, api]
+
+    SimulationFinancingRequest:
+      type: object
+      required: [principal, annualInterestRate, termMonths, downPayment]
+      properties:
+        principal: { type: number, exclusiveMinimum: 0 }
+        annualInterestRate: { type: number, minimum: 0 }
+        termMonths: { type: integer, minimum: 1, maximum: 600 }
+        downPayment: { type: number, minimum: 0 }
+        firstPaymentMonthOffset: { type: integer, minimum: 0, maximum: 600 }
+
+    SimulationRequest:
+      type: object
+      required: [assetType, initialCapital, expectedMonthlyRevenue, expectedOperatingCost, durationMonths]
+      properties:
+        assetType:
+          type: string
+          enum: [transport, real_estate, machinery, energy, other]
+        initialCapital: { type: number, exclusiveMinimum: 0 }
+        expectedMonthlyRevenue: { type: number, minimum: 0 }
+        expectedOperatingCost: { type: number, minimum: 0 }
+        growthRatePercent: { type: number }
+        durationMonths: { type: integer, minimum: 1, maximum: 600 }
+        discountRateAnnual: { type: number }
+        financing:
+          $ref: '#/components/schemas/SimulationFinancingRequest'
+
+    MetricsCoverage:
+      type: object
+      required: [actualMonths, projectedMonths, totalMonths]
+      properties:
+        actualMonths: { type: integer, minimum: 0 }
+        projectedMonths: { type: integer, minimum: 0 }
+        totalMonths: { type: integer, minimum: 0 }
+
+    CashFlowPoint:
+      type: object
+      required: [date, revenue, costs, netCashFlow, cumulativeCashFlow, mode]
+      properties:
+        date: { type: string, format: date-time }
+        revenue: { type: number }
+        costs: { type: number }
+        netCashFlow: { type: number }
+        cumulativeCashFlow: { type: number }
+        mode:
+          type: string
+          enum: [ACTUAL, PROJECTED]
+
+    AssetMetrics:
+      type: object
+      required:
+        - assetId
+        - initialInvestment
+        - accumulatedRevenue
+        - totalCosts
+        - operatingCosts
+        - ebitda
+        - netProfit
+        - roi
+        - irr
+        - paybackPeriodMonths
+        - npv
+        - cashFlow
+        - dataMode
+        - coverage
+        - calculationVersion
+      properties:
+        assetId: { type: string }
+        initialInvestment: { type: number }
+        accumulatedRevenue: { type: number }
+        totalCosts: { type: number }
+        operatingCosts: { type: number }
+        ebitda: { type: number }
+        netProfit: { type: number }
+        roi: { type: number }
+        irr: { type: number }
+        paybackPeriodMonths: { type: number }
+        npv: { type: number }
+        cashFlow:
+          type: array
+          items:
+            $ref: '#/components/schemas/CashFlowPoint'
+        dataMode:
+          type: string
+          enum: [SIMULATION, ACTUAL, HYBRID]
+        coverage:
+          $ref: '#/components/schemas/MetricsCoverage'
+        calculationVersion: { type: string }
+
+    FinancialInsight:
+      type: object
+      required: [severity, message, priority]
+      properties:
+        severity:
+          type: string
+          enum: [critical, warning, info, positive]
+        message: { type: string }
+        recommendation: { type: string }
+        priority: { type: number }
+
+    AssetFinancialMetricsResponse:
+      type: object
+      required: [assetId, calculationVersion, metrics]
+      properties:
+        assetId: { type: string }
+        calculationVersion: { type: string }
+        metrics:
+          type: object
+          required: [asset, equity]
+          properties:
+            asset: { $ref: '#/components/schemas/AssetMetrics' }
+            equity:
+              oneOf:
+                - { $ref: '#/components/schemas/AssetMetrics' }
+                - { type: 'null' }
+        financing:
+          type: object
+          nullable: true
+        insights:
+          type: object
+          properties:
+            asset:
+              type: array
+              items: { $ref: '#/components/schemas/FinancialInsight' }
+            equity:
+              type: array
+              nullable: true
+              items: { $ref: '#/components/schemas/FinancialInsight' }
+
+security:
+  - CognitoJwt: []
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      security: []
+      responses:
+        '200':
+          description: OK
+
+  /v1/{proxy+}:
+    options:
+      summary: CORS preflight (sin JWT en gateway)
+      security: []
+      responses:
+        '204':
+          description: No Content
+
+  /v1/admin/tenants:
+    get:
+      summary: Listar tenants (admin plataforma)
+      responses:
+        '200':
+          description: OK
+        '403':
+          description: Sin rol de administrador
+    post:
+      summary: Crear tenant
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                name: { type: string }
+                type:
+                  type: string
+                  enum: [fund, company, family_office, other]
+                id: { type: string }
+      responses:
+        '201':
+          description: Creado
+
+  /v1/admin/tenants/{tenantId}:
+    parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Detalle tenant
+      responses:
+        '200': { description: OK }
+    patch:
+      summary: Actualizar tenant
+      responses:
+        '200': { description: OK }
+
+  /v1/assets:
+    get:
+      summary: Listar activos
+      parameters:
+        - name: projectId
+          in: query
+          schema: { type: string }
+        - name: portfolioId
+          in: query
+          schema: { type: string }
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [transport, real_estate, machinery, energy, other]
+      responses:
+        '200': { description: Lista paginada (cursor opcional) }
+    post:
+      summary: Crear activo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAssetRequest'
+      responses:
+        '201': { description: Creado }
+
+  /v1/assets/{assetId}:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Obtener activo
+      responses:
+        '200': { description: OK }
+        '404': { description: No encontrado }
+    patch:
+      summary: Actualizar activo (parcial)
+      responses:
+        '200': { description: OK }
+    delete:
+      summary: Eliminar activo
+      responses:
+        '204': { description: Sin contenido }
+
+  /v1/assets/{assetId}/metrics:
+    get:
+      summary: Métricas calculadas (ROI, IRR, flujos, etc.) e insights financieros por reglas
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetFinancialMetricsResponse'
+
+  /v1/assets/{assetId}/cashflow:
+    get:
+      summary: Serie de cash flow agregada
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [assetId, cashFlow]
+                properties:
+                  assetId: { type: string }
+                  cashFlow:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CashFlowPoint'
+
+  /v1/assets/{assetId}/cash-flows:
+    put:
+      summary: Cargar / actualizar hechos mensuales (ingreso y costo por period YYYY-MM)
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutAssetCashFlowsRequest'
+      responses:
+        '200': { description: Métricas recalculadas tras upsert }
+
+  /v1/assets/{assetId}/structure:
+    get:
+      summary: Estructura financiera estandarizada
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+
+  /v1/portfolios:
+    get:
+      summary: Listar portfolios
+      responses:
+        '200': { description: OK }
+    post:
+      summary: Crear portfolio
+      responses:
+        '201': { description: Creado }
+
+  /v1/portfolios/{portfolioId}:
+    parameters:
+      - name: portfolioId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Detalle portfolio
+      responses:
+        '200': { description: OK }
+    patch:
+      summary: Actualizar portfolio
+      responses:
+        '200': { description: OK }
+
+  /v1/portfolios/{portfolioId}/metrics:
+    get:
+      summary: Métricas por activos del portfolio
+      parameters:
+        - name: portfolioId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+
+  /v1/portfolios/{portfolioId}/cashflow:
+    get:
+      summary: Cash flow por activo
+      parameters:
+        - name: portfolioId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+
+  /v1/portfolios/{portfolioId}/performance:
+    get:
+      summary: Performance agregada
+      parameters:
+        - name: portfolioId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+
+  /v1/projects:
+    get:
+      summary: Listar proyectos
+      parameters:
+        - name: portfolioId
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+    post:
+      summary: Crear proyecto
+      responses:
+        '201': { description: Creado }
+
+  /v1/projects/{projectId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Detalle proyecto
+      responses:
+        '200': { description: OK }
+    patch:
+      summary: Actualizar proyecto
+      responses:
+        '200': { description: OK }
+
+  /v1/projects/{projectId}/metrics:
+    get:
+      summary: Métricas por activos del proyecto
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+
+  /v1/projects/{projectId}/cashflow:
+    get:
+      summary: Cash flow por activo del proyecto
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+
+  /v1/dashboard/executive:
+    get:
+      summary: KPIs ejecutivos
+      responses:
+        '200': { description: OK }
+
+  /v1/insights:
+    get:
+      summary: Insights
+      responses:
+        '200': { description: OK }
+
+  /v1/imports/assets:
+    post:
+      summary: Iniciar import de assets
+      responses:
+        '202': { description: Job aceptado }
+
+  /v1/imports/assets/{jobId}:
+    get:
+      summary: Estado del job de import
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+
+  /v1/simulations:
+    get:
+      summary: Listar simulaciones guardadas
+      responses:
+        '200': { description: OK }
+    post:
+      summary: Crear simulación
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulationRequest'
+      responses:
+        '201': { description: Creada }
+
+  /v1/simulations/{simulationId}:
+    parameters:
+      - name: simulationId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Detalle de simulación
+      responses:
+        '200': { description: OK }
+        '404': { description: No encontrada }
+    patch:
+      summary: Actualizar simulación y recalcular
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulationRequest'
+      responses:
+        '200': { description: OK }
+        '404': { description: No encontrada }
+    delete:
+      summary: Eliminar simulación
+      responses:
+        '204': { description: Sin contenido }
+        '404': { description: No encontrada }
+
+  /v1/alerts:
+    get:
+      summary: Alertas (MVP)
+      responses:
+        '200': { description: OK }

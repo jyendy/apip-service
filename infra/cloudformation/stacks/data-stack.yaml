@@ -1,0 +1,172 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  APIP data (DynamoDB). No compute dependencies. Deploy in parallel with messaging-stack.
+  Fixed resource names per account; one AWS account per environment.
+
+Resources:
+  ApipCoreTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: apip-core
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+        - AttributeName: GSI3PK
+          AttributeType: S
+        - AttributeName: GSI3SK
+          AttributeType: S
+        - AttributeName: GSI4PK
+          AttributeType: S
+        - AttributeName: GSI4SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI3
+          KeySchema:
+            - AttributeName: GSI3PK
+              KeyType: HASH
+            - AttributeName: GSI3SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI4
+          KeySchema:
+            - AttributeName: GSI4PK
+              KeyType: HASH
+            - AttributeName: GSI4SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  ApipAuditTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: apip-audit
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+  ApipAccessRolesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: apip-access-roles
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+  ApipUserProfilesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: apip-user-profiles
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+Outputs:
+  CoreTableName:
+    Description: Core single-table name
+    Value: !Ref ApipCoreTable
+    Export:
+      Name: apip-core-table-name
+  CoreTableArn:
+    Description: Core table ARN
+    Value: !GetAtt ApipCoreTable.Arn
+    Export:
+      Name: apip-core-table-arn
+  AuditTableName:
+    Description: Audit append-only table name
+    Value: !Ref ApipAuditTable
+    Export:
+      Name: apip-audit-table-name
+  AuditTableArn:
+    Description: Audit table ARN
+    Value: !GetAtt ApipAuditTable.Arn
+    Export:
+      Name: apip-audit-table-arn
+
+  AccessRolesTableName:
+    Description: Access roles table name
+    Value: !Ref ApipAccessRolesTable
+    Export:
+      Name: apip-access-roles-table-name
+
+  AccessRolesTableArn:
+    Description: Access roles table ARN
+    Value: !GetAtt ApipAccessRolesTable.Arn
+    Export:
+      Name: apip-access-roles-table-arn
+
+  UserProfilesTableName:
+    Description: User profiles table name
+    Value: !Ref ApipUserProfilesTable
+    Export:
+      Name: apip-user-profiles-table-name
+
+  UserProfilesTableArn:
+    Description: User profiles table ARN
+    Value: !GetAtt ApipUserProfilesTable.Arn
+    Export:
+      Name: apip-user-profiles-table-arn

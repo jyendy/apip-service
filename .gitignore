@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build / coverage
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Env & local
+.env
+.env.*
+!.env.example
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Serverless / SAM / CDK (si se usan)
+.aws-sam/
+cdk.out/
+*.zip
