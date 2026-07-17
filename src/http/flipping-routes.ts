@@ -64,7 +64,7 @@ export async function tryRouteFlipping(
     if (method === 'GET') {
       const denied = requireRbac(ctx, event, rbacState, 'asset:read', scope)
       if (denied) return denied
-      let project = await flipRepo.getFlipProject(ctx.tenantId, assetId)
+      const project = await flipRepo.getFlipProject(ctx.tenantId, assetId)
       if (!project) {
         return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proyecto Flipping no iniciado')
       }
