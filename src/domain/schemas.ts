@@ -65,8 +65,14 @@ const financialModelSchema = z
     estimatedMonthlyRevenue: z.number().nonnegative(),
     estimatedMonthlyCost: z.number().nonnegative(),
     durationMonths: z.number().int().positive().max(600),
-    revenueGrowthRate: z.number().optional(),
-    costGrowthRate: z.number().optional(),
+    revenueGrowthRate: z
+      .number()
+      .nullish()
+      .transform(v => (v == null ? undefined : v)),
+    costGrowthRate: z
+      .number()
+      .nullish()
+      .transform(v => (v == null ? undefined : v)),
   })
   .optional()
 
