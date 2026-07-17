@@ -16,7 +16,7 @@ export async function resolveDocumentScope(
   bodyPortfolioId?: string,
   bodyProjectId?: string,
 ): Promise<ResolveScopeResult> {
-  if (entityType === 'asset' || entityType === 'property') {
+  if (entityType === 'asset' || entityType === 'property' || entityType === 'flip_project') {
     const asset = await repo.getAsset(tenantId, entityId)
     if (!asset) return { ok: false, code: 'ASSET_NOT_FOUND' }
     return { ok: true, portfolioId: asset.portfolioId, projectId: asset.projectId }

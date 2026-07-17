@@ -32,4 +32,6 @@ export const newId = {
   document: () => shortId('doc'),
   docRequirement: () => shortId('dreq'),
   userAssignment: () => shortId('uas'),
+  flipDueDiligence: () => shortId('fdd'),
+  flipRehab: () => shortId('frh'),
 }

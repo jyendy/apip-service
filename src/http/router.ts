@@ -90,6 +90,7 @@ import {
 import { buildInvestorExposure } from '../services/investors'
 import { buildAssetRegisterReport, buildInvestmentSummaryReport, buildPortfolioSnapshotReport } from '../services/reports'
 import { tryRouteDocuments } from './documents-routes'
+import { tryRouteFlipping } from './flipping-routes'
 import {
   buildTmsSummary,
   isKnownCostCategory,
@@ -2934,6 +2935,9 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
 
     const docRoute = await tryRouteDocuments(ctx, event, method, seg, rbacState)
     if (docRoute) return docRoute
+
+    const flipRoute = await tryRouteFlipping(ctx, event, method, seg, rbacState)
+    if (flipRoute) return flipRoute
 
     // --- alerts ---
     if (seg[0] === 'v1' && seg[1] === 'alerts' && seg.length === 2) {

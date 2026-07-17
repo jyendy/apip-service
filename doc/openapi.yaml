@@ -50,7 +50,7 @@ components:
         name: { type: string }
         type:
           type: string
-          enum: [transport, real_estate, machinery, energy, other]
+          enum: [transport, real_estate, flip, machinery, energy, other]
         acquisitionDate: { type: string, format: date-time }
         initialInvestment: { type: number }
         currency: { type: string, default: USD, minLength: 3, maxLength: 3 }
@@ -98,7 +98,7 @@ components:
       properties:
         assetType:
           type: string
-          enum: [transport, real_estate, machinery, energy, other]
+          enum: [transport, real_estate, flip, machinery, energy, other]
         initialCapital: { type: number, exclusiveMinimum: 0 }
         expectedMonthlyRevenue: { type: number, minimum: 0 }
         expectedOperatingCost: { type: number, minimum: 0 }
@@ -285,7 +285,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [transport, real_estate, machinery, energy, other]
+            enum: [transport, real_estate, flip, machinery, energy, other]
       responses:
         '200': { description: Lista paginada (cursor opcional) }
     post:
@@ -569,5 +569,96 @@ paths:
   /v1/alerts:
     get:
       summary: Alertas (MVP)
+      responses:
+        '200': { description: OK }
+
+  /v1/flipping/projects/{assetId}:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Obtener proyecto Flipping (activo type=flip)
+      responses:
+        '200': { description: OK }
+        '404': { description: Proyecto no iniciado o activo no encontrado }
+    put:
+      summary: Iniciar o actualizar proyecto Flipping
+      responses:
+        '200': { description: OK }
+    patch:
+      summary: Actualizar fechas y dirección del proyecto
+      responses:
+        '200': { description: OK }
+
+  /v1/flipping/projects/{assetId}/workflow:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      summary: Actualizar estado del workflow Flipping
+      responses:
+        '200': { description: OK }
+
+  /v1/flipping/projects/{assetId}/due-diligence:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Listar checklist due diligence
+      responses:
+        '200': { description: OK }
+    post:
+      summary: Añadir ítem al checklist
+      responses:
+        '201': { description: Creado }
+
+  /v1/flipping/projects/{assetId}/due-diligence/{itemId}:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        schema: { type: string }
+      - name: itemId
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      summary: Actualizar ítem de due diligence
+      responses:
+        '200': { description: OK }
+
+  /v1/flipping/projects/{assetId}/rehabs:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Listar rehabilitaciones
+      responses:
+        '200': { description: OK }
+    post:
+      summary: Registrar rehabilitación (genera CostFact)
+      responses:
+        '201': { description: Creado }
+
+  /v1/flipping/projects/{assetId}/rehabs/{rehabId}:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        schema: { type: string }
+      - name: rehabId
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      summary: Actualizar rehabilitación
       responses:
         '200': { description: OK }

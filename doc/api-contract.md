@@ -105,6 +105,8 @@ Respuesta **201**: objeto `Portfolio` creado (`id` generado en servidor, `tenant
 
 **Body POST/PATCH asset** (campos principales): ver `openapi.yaml` y esquema Zod `createAssetBody` / `patchAssetBody`.
 
+**Tipos de activo** (`type`): `transport`, `real_estate`, `flip`, `machinery`, `energy`, `other`. El tipo `flip` habilita el módulo operativo Flipping (Fix & Flip), independiente de `real_estate`.
+
 **Regla de edición (modelo):** si el activo ya tiene hechos operativos (`RevenueFact`/`CostFact`), el backend bloquea cambios estructurales en `type`, `acquisitionDate`, `initialInvestment` y `currency` con `409 MODEL_LOCKED` para evitar romper series históricas.
 
 **Body PUT `/cash-flows`**:
@@ -116,6 +118,29 @@ Respuesta **201**: objeto `Portfolio` creado (`id` generado en servidor, `tenant
   ]
 }
 ```
+
+### Flipping (módulo operativo Fix & Flip)
+
+Solo aplica a activos con `type: flip`. No expone métricas financieras; las rehabilitaciones generan `CostFact` con `source: flipping`.
+
+Documentación de producto (front): [`../../apip-front/doc/flipping-operativo-mvp.md`](../../apip-front/doc/flipping-operativo-mvp.md).
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/v1/flipping/projects/{assetId}` | Proyecto + activo (404 si no iniciado) |
+| PUT | `/v1/flipping/projects/{assetId}` | Inicia o actualiza proyecto (seed DD en primera creación) |
+| PATCH | `/v1/flipping/projects/{assetId}` | Actualiza fechas y dirección |
+| PATCH | `/v1/flipping/projects/{assetId}/workflow` | Cambio de estado + comentario opcional |
+| GET | `/v1/flipping/projects/{assetId}/due-diligence` | Lista checklist |
+| POST | `/v1/flipping/projects/{assetId}/due-diligence` | Añade ítem al checklist |
+| PATCH | `/v1/flipping/projects/{assetId}/due-diligence/{itemId}` | Marca completado / edita ítem |
+| GET | `/v1/flipping/projects/{assetId}/rehabs` | Lista rehabilitaciones |
+| POST | `/v1/flipping/projects/{assetId}/rehabs` | Alta rehab → crea `CostFact` si aplica |
+| PATCH | `/v1/flipping/projects/{assetId}/rehabs/{rehabId}` | Edición rehab → sincroniza `CostFact` |
+
+**Fotografías**: reutilizar `POST /v1/documents` con `entityType: flip_project`, `entityId: {assetId}`, campos opcionales `photoPhase` (`before` \| `during` \| `after`) y `rehabId`.
+
+**Documentos del activo**: `GET/POST /v1/documents` con `entityType: asset` (igual que Real Estate).
 
 ### Dashboard e insights
 

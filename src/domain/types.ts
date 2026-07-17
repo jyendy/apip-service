@@ -85,7 +85,7 @@ export type Scenario = {
   createdBy: string
 }
 
-export type AssetType = 'transport' | 'real_estate' | 'machinery' | 'energy' | 'other'
+export type AssetType = 'transport' | 'real_estate' | 'flip' | 'machinery' | 'energy' | 'other'
 
 export type AssetStatus = 'active' | 'inactive' | 'maintenance' | 'sold'
 
@@ -138,7 +138,7 @@ export type CapitalEvent = {
   createdAt: string
 }
 
-export type FactSource = 'manual' | 'import' | 'api' | 'real_estate'
+export type FactSource = 'manual' | 'import' | 'api' | 'real_estate' | 'flipping'
 
 /** Hechos de ingreso; `category` libre (p. ej. tms, monthly). */
 export type RevenueFact = {
@@ -163,7 +163,7 @@ export type CostFact = {
   category: string
   source: FactSource
   createdAt: string
-  sourceRef?: { kind: 'tms_trip' | 'tms_order'; id: string }
+  sourceRef?: { kind: 'tms_trip' | 'tms_order' | 'flip_rehab'; id: string }
 }
 
 export type CapitalContribution = {
@@ -644,6 +644,8 @@ export type DocumentEntityType =
 
 export type DocumentStatus = 'pending' | 'uploaded' | 'validated' | 'rejected'
 
+export type DocumentPhotoPhase = 'before' | 'during' | 'after'
+
 export type Document = {
   id: string
   tenantId: string
@@ -659,11 +661,88 @@ export type Document = {
   status: DocumentStatus
   required: boolean
   requirementId?: string
+  /** Clasificación fotográfica del módulo Flipping (entityType flip_project). */
+  photoPhase?: DocumentPhotoPhase
+  /** Rehabilitación opcional asociada a la fotografía. */
+  rehabId?: string
   uploadedAt?: string
   validatedAt?: string
   rejectedAt?: string
   rejectReason?: string
   createdAt: string
+}
+
+export type FlipWorkflowStatus =
+  | 'review'
+  | 'offer_submitted'
+  | 'under_contract_purchase'
+  | 'purchased'
+  | 'rehab'
+  | 'listed'
+  | 'under_contract_sale'
+  | 'sold'
+  | 'cancelled'
+
+export type FlipRehabCategory =
+  | 'kitchen'
+  | 'bathroom'
+  | 'flooring'
+  | 'electrical'
+  | 'plumbing'
+  | 'roof'
+  | 'paint'
+  | 'hvac'
+  | 'landscaping'
+  | 'other'
+
+export type FlipRehabStatus = 'planned' | 'in_progress' | 'completed' | 'cancelled'
+
+/** Proyecto operativo Fix & Flip (1:1 con activo type=flip). */
+export type FlipProject = {
+  assetId: string
+  tenantId: string
+  address?: string
+  workflowStatus: FlipWorkflowStatus
+  workflowUpdatedAt?: string
+  workflowUpdatedBy?: string
+  workflowComment?: string
+  purchaseDate?: string
+  estimatedSaleDate?: string
+  actualSaleDate?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type FlipDueDiligenceItem = {
+  id: string
+  tenantId: string
+  assetId: string
+  name: string
+  description?: string
+  completed: boolean
+  completedAt?: string
+  completedBy?: string
+  sortOrder?: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type FlipRehab = {
+  id: string
+  tenantId: string
+  assetId: string
+  date: string
+  category: FlipRehabCategory
+  description?: string
+  vendor?: string
+  amount: number
+  status: FlipRehabStatus
+  notes?: string
+  costFactId?: string
+  /** Reservado para agrupar rehabs por fase en evoluciones futuras. */
+  phaseId?: string
+  createdAt: string
+  updatedAt: string
 }
 
 /** Plantilla de documento obligatorio/opcional por tipo de entidad. */
