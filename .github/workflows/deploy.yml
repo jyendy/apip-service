@@ -233,6 +233,8 @@ jobs:
           aws cloudformation deploy \
             --stack-name apip-api \
             --template-file infra/cloudformation/stacks/api-stack.yaml \
+            --s3-bucket ${{ needs.build-lambda.outputs.lambda_code_bucket }} \
+            --s3-prefix cfn-templates/apip-api \
             --parameter-overrides \
               LambdaCodeBucket=${{ needs.build-lambda.outputs.lambda_code_bucket }} \
               LambdaCodeKey=${{ needs.build-lambda.outputs.lambda_code_key }} \
