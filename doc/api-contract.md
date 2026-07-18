@@ -129,7 +129,7 @@ Documentación de producto (front): [`../../apip-front/doc/flipping-operativo-mv
 |--------|------|-------------|
 | GET | `/v1/flipping/projects/{assetId}` | Proyecto + activo (404 si no iniciado) |
 | PUT | `/v1/flipping/projects/{assetId}` | Inicia o actualiza proyecto (seed DD en primera creación) |
-| PATCH | `/v1/flipping/projects/{assetId}` | Actualiza fechas y dirección |
+| PATCH | `/v1/flipping/projects/{assetId}` | Actualiza fechas, dirección y tipo de compra |
 | PATCH | `/v1/flipping/projects/{assetId}/workflow` | Cambio de estado + comentario opcional |
 | GET | `/v1/flipping/projects/{assetId}/due-diligence` | Lista checklist |
 | POST | `/v1/flipping/projects/{assetId}/due-diligence` | Añade ítem al checklist |
@@ -137,6 +137,14 @@ Documentación de producto (front): [`../../apip-front/doc/flipping-operativo-mv
 | GET | `/v1/flipping/projects/{assetId}/rehabs` | Lista rehabilitaciones |
 | POST | `/v1/flipping/projects/{assetId}/rehabs` | Alta rehab → crea `CostFact` si aplica |
 | PATCH | `/v1/flipping/projects/{assetId}/rehabs/{rehabId}` | Edición rehab → sincroniza `CostFact` |
+| GET | `/v1/flipping/catalogs` | Tipos de compra y categorías de rehabilitación |
+| GET | `/v1/vendors` | Lista proveedores globales del tenant |
+| POST | `/v1/vendors` | Crea proveedor (nombre, teléfono, email, especialidad) |
+| PATCH | `/v1/vendors/{vendorId}` | Actualiza o desactiva proveedor |
+
+El Due Diligence usa `phase`: `review`, `budget_analysis`, `rehab`, `listing`. No hay dependencias ni asignaciones.
+
+Las categorías rehab son `kitchen`, `bathroom`, `flooring`, `electrical`, `plumbing`, `roof`, `paint`, `hvac`, `landscaping`, `hoa`, `dumpster`, `permits`, `lawyer`, `other`.
 
 **Fotografías**: reutilizar `POST /v1/documents` con `entityType: flip_project`, `entityId: {assetId}`, campos opcionales `photoPhase` (`before` \| `during` \| `after`) y `rehabId`.
 

@@ -113,6 +113,8 @@ export const skFlipDueDiligenceItem = (assetId: string, itemId: string) => `FLIP
 
 export const skFlipRehab = (assetId: string, rehabId: string) => `FLIP#REHAB#${assetId}#${rehabId}`
 
+export const skVendor = (vendorId: string) => `VENDOR#${vendorId}`
+
 export const skDocument = (documentId: string) => `DOC#${documentId}`
 
 /** Plantillas de documentos requeridos por tipo de entidad. */

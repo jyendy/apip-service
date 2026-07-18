@@ -34,4 +34,5 @@ export const newId = {
   userAssignment: () => shortId('uas'),
   flipDueDiligence: () => shortId('fdd'),
   flipRehab: () => shortId('frh'),
+  vendor: () => shortId('vnd'),
 }

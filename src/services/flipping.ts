@@ -1,19 +1,43 @@
-import type { Asset, CostFact, FlipDueDiligenceItem, FlipProject, FlipRehab, FlipRehabCategory } from '../domain/types'
+import type {
+  Asset,
+  CostFact,
+  FlipDueDiligenceItem,
+  FlipDueDiligencePhase,
+  FlipProject,
+  FlipRehab,
+  FlipRehabCategory,
+} from '../domain/types'
 import { newId } from '../lib/ids'
 import * as repo from '../repositories/core-repository'
 import * as flipRepo from '../repositories/flipping-repository'
 
-export const DEFAULT_DUE_DILIGENCE_ITEMS: Array<{ name: string; description?: string }> = [
-  { name: 'Title Review', description: 'Revisión de título de propiedad' },
-  { name: 'Liens', description: 'Gravámenes y cargas' },
-  { name: 'Property Taxes', description: 'Impuestos prediales' },
-  { name: 'HOA Verification', description: 'Verificación de HOA' },
-  { name: 'Structural Inspection', description: 'Inspección estructural' },
-  { name: 'Electrical Inspection', description: 'Inspección eléctrica' },
-  { name: 'Plumbing Inspection', description: 'Inspección de plomería' },
-  { name: 'Roof Inspection', description: 'Inspección de techo' },
-  { name: 'Budget Approved', description: 'Presupuesto de rehab aprobado' },
-  { name: 'Financing Approved', description: 'Financiamiento aprobado' },
+export const FLIP_PURCHASE_TYPES = ['mls', 'auction', 'reo', 'short_sale'] as const
+export const FLIP_REHAB_CATEGORIES: FlipRehabCategory[] = [
+  'kitchen',
+  'bathroom',
+  'flooring',
+  'electrical',
+  'plumbing',
+  'roof',
+  'paint',
+  'hvac',
+  'landscaping',
+  'hoa',
+  'dumpster',
+  'permits',
+  'lawyer',
+  'other',
+]
+
+export const DEFAULT_DUE_DILIGENCE_ITEMS: Array<{ phase: FlipDueDiligencePhase; name: string }> = [
+  { phase: 'review', name: 'Verify Property History' },
+  { phase: 'review', name: 'Verify Liens' },
+  { phase: 'review', name: 'Verify Property Taxes' },
+  { phase: 'budget_analysis', name: 'Request Budget' },
+  { phase: 'budget_analysis', name: 'Review Budget' },
+  { phase: 'budget_analysis', name: 'Approve Budget' },
+  { phase: 'rehab', name: 'Change Orders' },
+  { phase: 'listing', name: 'Final Inspection' },
 ]
 
 export function rehabCategoryToCostCategory(category: FlipRehabCategory): string {
@@ -58,8 +82,8 @@ export async function seedDefaultDueDiligence(tenantId: string, assetId: string)
         id: newId.flipDueDiligence(),
         tenantId,
         assetId,
+        phase: item.phase,
         name: item.name,
-        description: item.description,
         completed: false,
         sortOrder: index,
         createdAt: now,

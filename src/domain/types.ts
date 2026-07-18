@@ -693,15 +693,22 @@ export type FlipRehabCategory =
   | 'paint'
   | 'hvac'
   | 'landscaping'
+  | 'hoa'
+  | 'dumpster'
+  | 'permits'
+  | 'lawyer'
   | 'other'
 
 export type FlipRehabStatus = 'planned' | 'in_progress' | 'completed' | 'cancelled'
+export type FlipPurchaseType = 'mls' | 'auction' | 'reo' | 'short_sale'
+export type FlipDueDiligencePhase = 'review' | 'budget_analysis' | 'rehab' | 'listing'
 
 /** Proyecto operativo Fix & Flip (1:1 con activo type=flip). */
 export type FlipProject = {
   assetId: string
   tenantId: string
   address?: string
+  purchaseType?: FlipPurchaseType
   workflowStatus: FlipWorkflowStatus
   workflowUpdatedAt?: string
   workflowUpdatedBy?: string
@@ -717,11 +724,12 @@ export type FlipDueDiligenceItem = {
   id: string
   tenantId: string
   assetId: string
+  phase: FlipDueDiligencePhase
   name: string
-  description?: string
   completed: boolean
   completedAt?: string
   completedBy?: string
+  notes?: string
   sortOrder?: number
   createdAt: string
   updatedAt: string
@@ -734,13 +742,27 @@ export type FlipRehab = {
   date: string
   category: FlipRehabCategory
   description?: string
-  vendor?: string
+  vendorId?: string
+  vendorName?: string
   amount: number
   status: FlipRehabStatus
   notes?: string
   costFactId?: string
   /** Reservado para agrupar rehabs por fase en evoluciones futuras. */
   phaseId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Catálogo transversal de proveedores del tenant; UI inicial disponible en Flipping. */
+export type Vendor = {
+  id: string
+  tenantId: string
+  name: string
+  phone?: string
+  email?: string
+  specialty?: string
+  active: boolean
   createdAt: string
   updatedAt: string
 }

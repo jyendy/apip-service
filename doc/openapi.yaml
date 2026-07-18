@@ -588,7 +588,7 @@ paths:
       responses:
         '200': { description: OK }
     patch:
-      summary: Actualizar fechas y dirección del proyecto
+      summary: Actualizar fechas, dirección y tipo de compra del proyecto
       responses:
         '200': { description: OK }
 
@@ -660,5 +660,32 @@ paths:
         schema: { type: string }
     patch:
       summary: Actualizar rehabilitación
+      responses:
+        '200': { description: OK }
+
+  /v1/flipping/catalogs:
+    get:
+      summary: Catálogos estáticos de compra y rehabilitación
+      responses:
+        '200': { description: OK }
+
+  /v1/vendors:
+    get:
+      summary: Listar proveedores globales del tenant
+      responses:
+        '200': { description: OK }
+    post:
+      summary: Crear proveedor
+      responses:
+        '201': { description: Creado }
+
+  /v1/vendors/{vendorId}:
+    parameters:
+      - name: vendorId
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      summary: Actualizar o desactivar proveedor
       responses:
         '200': { description: OK }

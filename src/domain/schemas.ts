@@ -622,13 +622,20 @@ export const flipRehabCategorySchema = z.enum([
   'paint',
   'hvac',
   'landscaping',
+  'hoa',
+  'dumpster',
+  'permits',
+  'lawyer',
   'other',
 ])
 
 export const flipRehabStatusSchema = z.enum(['planned', 'in_progress', 'completed', 'cancelled'])
+export const flipPurchaseTypeSchema = z.enum(['mls', 'auction', 'reo', 'short_sale'])
+export const flipDueDiligencePhaseSchema = z.enum(['review', 'budget_analysis', 'rehab', 'listing'])
 
 export const putFlipProjectBody = z.object({
   address: z.string().max(500).optional(),
+  purchaseType: flipPurchaseTypeSchema.optional(),
   purchaseDate: z.string().datetime().optional(),
   estimatedSaleDate: z.string().datetime().optional(),
   actualSaleDate: z.string().datetime().optional(),
@@ -643,15 +650,17 @@ export const patchFlipWorkflowBody = z.object({
 })
 
 export const createFlipDueDiligenceBody = z.object({
+  phase: flipDueDiligencePhaseSchema,
   name: z.string().min(1).max(200),
-  description: z.string().max(2000).optional(),
+  notes: z.string().max(5000).optional(),
   sortOrder: z.number().int().optional(),
 })
 
 export const patchFlipDueDiligenceBody = z.object({
+  phase: flipDueDiligencePhaseSchema.optional(),
   name: z.string().min(1).max(200).optional(),
-  description: z.string().max(2000).optional(),
   completed: z.boolean().optional(),
+  notes: z.string().max(5000).optional(),
   sortOrder: z.number().int().optional(),
 })
 
@@ -659,7 +668,7 @@ export const createFlipRehabBody = z.object({
   date: z.string().datetime(),
   category: flipRehabCategorySchema,
   description: z.string().max(2000).optional(),
-  vendor: z.string().max(200).optional(),
+  vendorId: z.string().min(1).optional(),
   amount: z.number().nonnegative(),
   status: flipRehabStatusSchema.default('planned'),
   notes: z.string().max(5000).optional(),
@@ -667,3 +676,14 @@ export const createFlipRehabBody = z.object({
 })
 
 export const patchFlipRehabBody = createFlipRehabBody.partial()
+
+export const createVendorBody = z.object({
+  name: z.string().min(1).max(200),
+  phone: z.string().max(50).optional(),
+  email: z.string().email().max(320).optional(),
+  specialty: z.string().max(200).optional(),
+})
+
+export const patchVendorBody = createVendorBody.partial().extend({
+  active: z.boolean().optional(),
+})

@@ -37,6 +37,9 @@ export const COST_CATEGORY_CATALOG: CostCategoryDefinition[] = [
   { code: 'paint', label: 'Pintura', bucket: 'maintenance' },
   { code: 'hvac', label: 'HVAC', bucket: 'maintenance' },
   { code: 'landscaping', label: 'Paisajismo', bucket: 'maintenance' },
+  { code: 'hoa', label: 'HOA', bucket: 'operational' },
+  { code: 'dumpster', label: 'Contenedor de residuos', bucket: 'maintenance' },
+  { code: 'lawyer', label: 'Abogado', bucket: 'other' },
   { code: 'flip_other', label: 'Rehab — otro', bucket: 'maintenance' },
 ]
 

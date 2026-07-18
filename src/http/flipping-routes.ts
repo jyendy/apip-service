@@ -2,24 +2,29 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda
 import type { RequestContext } from '../auth/context'
 import { requireRbac } from '../auth/require-rbac'
 import {
+  createVendorBody,
   createFlipDueDiligenceBody,
   createFlipRehabBody,
   patchFlipDueDiligenceBody,
   patchFlipProjectBody,
   patchFlipRehabBody,
   patchFlipWorkflowBody,
+  patchVendorBody,
   putFlipProjectBody,
 } from '../domain/schemas'
 import type { RbacState } from '../domain/rbac'
-import type { Asset, FlipDueDiligenceItem, FlipProject, FlipRehab } from '../domain/types'
+import type { Asset, FlipDueDiligenceItem, FlipProject, FlipRehab, Vendor } from '../domain/types'
 import { auditedJsonError, finalizeAudit } from '../lib/audit'
 import { json } from '../lib/http'
 import { newId } from '../lib/ids'
 import * as repo from '../repositories/core-repository'
 import * as flipRepo from '../repositories/flipping-repository'
+import * as vendorsRepo from '../repositories/vendors-repository'
 import {
   assertFlipAsset,
   ensureFlipProject,
+  FLIP_PURCHASE_TYPES,
+  FLIP_REHAB_CATEGORIES,
   syncRehabCostFact,
 } from '../services/flipping'
 
@@ -51,7 +56,66 @@ export async function tryRouteFlipping(
   seg: string[],
   rbacState: RbacState,
 ): Promise<APIGatewayProxyResultV2 | null> {
-  if (seg[0] !== 'v1' || seg[1] !== 'flipping' || seg[2] !== 'projects' || !seg[3]) return null
+  if (seg[0] !== 'v1') return null
+
+  // Catálogo transversal de proveedores; UI inicial expuesta desde Flipping.
+  if (seg[1] === 'vendors' && seg.length === 2) {
+    if (method === 'GET') {
+      const denied = requireRbac(ctx, event, rbacState, 'asset:read', {})
+      if (denied) return denied
+      const items = await vendorsRepo.listVendors(ctx.tenantId)
+      items.sort((a, b) => a.name.localeCompare(b.name))
+      return finalizeAudit(ctx, event, json(200, { items }))
+    }
+    if (method === 'POST') {
+      const denied = requireRbac(ctx, event, rbacState, 'asset:write', {})
+      if (denied) return denied
+      const body = createVendorBody.safeParse(parseBody(event.body))
+      if (!body.success) {
+        return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+      }
+      const now = new Date().toISOString()
+      const vendor: Vendor = {
+        id: newId.vendor(),
+        tenantId: ctx.tenantId,
+        ...body.data,
+        active: true,
+        createdAt: now,
+        updatedAt: now,
+      }
+      await vendorsRepo.putVendor(vendor)
+      return finalizeAudit(ctx, event, json(201, vendor))
+    }
+  }
+
+  if (seg[1] === 'vendors' && seg[2] && seg.length === 3 && method === 'PATCH') {
+    const denied = requireRbac(ctx, event, rbacState, 'asset:write', {})
+    if (denied) return denied
+    const existing = await vendorsRepo.getVendor(ctx.tenantId, seg[2])
+    if (!existing) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Proveedor no encontrado')
+    const body = patchVendorBody.safeParse(parseBody(event.body))
+    if (!body.success) {
+      return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
+    }
+    const next: Vendor = { ...existing, ...body.data, updatedAt: new Date().toISOString() }
+    await vendorsRepo.putVendor(next)
+    return finalizeAudit(ctx, event, json(200, next))
+  }
+
+  if (seg[1] !== 'flipping') return null
+
+  // Catálogos de dominio estáticos: única fuente para clientes del módulo.
+  if (seg[2] === 'catalogs' && seg.length === 3 && method === 'GET') {
+    const denied = requireRbac(ctx, event, rbacState, 'asset:read', {})
+    if (denied) return denied
+    return finalizeAudit(
+      ctx,
+      event,
+      json(200, { purchaseTypes: FLIP_PURCHASE_TYPES, rehabCategories: FLIP_REHAB_CATEGORIES }),
+    )
+  }
+
+  if (seg[2] !== 'projects' || !seg[3]) return null
 
   const assetId = seg[3]
   const loaded = await loadFlipAsset(ctx, event, assetId)
@@ -156,8 +220,9 @@ export async function tryRouteFlipping(
         id: newId.flipDueDiligence(),
         tenantId: ctx.tenantId,
         assetId,
+        phase: body.data.phase,
         name: body.data.name,
-        description: body.data.description,
+        notes: body.data.notes,
         completed: false,
         sortOrder: body.data.sortOrder,
         createdAt: now,
@@ -214,6 +279,12 @@ export async function tryRouteFlipping(
         return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
       }
       const now = new Date().toISOString()
+      const vendor = body.data.vendorId
+        ? await vendorsRepo.getVendor(ctx.tenantId, body.data.vendorId)
+        : null
+      if (body.data.vendorId && (!vendor || !vendor.active)) {
+        return auditedJsonError(ctx, event, 400, 'VALIDATION', 'vendorId no existe o está inactivo')
+      }
       let rehab: FlipRehab = {
         id: newId.flipRehab(),
         tenantId: ctx.tenantId,
@@ -221,7 +292,8 @@ export async function tryRouteFlipping(
         date: body.data.date,
         category: body.data.category,
         description: body.data.description,
-        vendor: body.data.vendor,
+        vendorId: vendor?.id,
+        vendorName: vendor?.name,
         amount: body.data.amount,
         status: body.data.status,
         notes: body.data.notes,
@@ -247,9 +319,16 @@ export async function tryRouteFlipping(
       return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Body inválido', body.error.flatten())
     }
     const now = new Date().toISOString()
+    const vendorId = body.data.vendorId ?? existing.vendorId
+    const vendor = vendorId ? await vendorsRepo.getVendor(ctx.tenantId, vendorId) : null
+    if (vendorId && (!vendor || !vendor.active)) {
+      return auditedJsonError(ctx, event, 400, 'VALIDATION', 'vendorId no existe o está inactivo')
+    }
     let rehab: FlipRehab = {
       ...existing,
       ...body.data,
+      vendorId: vendor?.id,
+      vendorName: vendor?.name,
       updatedAt: now,
     }
     assertFlipAsset(asset)
