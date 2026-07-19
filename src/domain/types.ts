@@ -713,6 +713,7 @@ export type FlipProject = {
   workflowUpdatedAt?: string
   workflowUpdatedBy?: string
   workflowComment?: string
+  /** @deprecated Usar Asset.acquisitionDate. Campo legado; no se acepta en escritura. */
   purchaseDate?: string
   estimatedSaleDate?: string
   actualSaleDate?: string

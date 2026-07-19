@@ -636,7 +636,6 @@ export const flipDueDiligencePhaseSchema = z.enum(['review', 'budget_analysis', 
 export const putFlipProjectBody = z.object({
   address: z.string().max(500).optional(),
   purchaseType: flipPurchaseTypeSchema.optional(),
-  purchaseDate: z.string().datetime().optional(),
   estimatedSaleDate: z.string().datetime().optional(),
   actualSaleDate: z.string().datetime().optional(),
 })
