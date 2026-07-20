@@ -497,6 +497,16 @@ export async function deleteCostFact(tenantId: string, assetId: string, factId: 
   )
 }
 
+export async function deleteRevenueFact(tenantId: string, assetId: string, factId: string): Promise<void> {
+  const ddb = getDocumentClient()
+  await ddb.send(
+    new DeleteCommand({
+      TableName: tableName(),
+      Key: { PK: keys.pkTenant(tenantId), SK: keys.skRevenueFact(assetId, factId) },
+    }),
+  )
+}
+
 export async function putCapitalContribution(c: CapitalContribution): Promise<void> {
   const ddb = getDocumentClient()
   await ddb.send(

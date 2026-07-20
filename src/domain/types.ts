@@ -150,7 +150,7 @@ export type RevenueFact = {
   category: string
   source: FactSource
   createdAt: string
-  sourceRef?: { kind: 'tms_trip' | 'tms_order'; id: string }
+  sourceRef?: { kind: 'tms_trip' | 'tms_order' | 'flip_sale'; id: string }
 }
 
 /** Código del catálogo (`cost-categories.ts`); el motor agrupa vía `costCategoryToBucket`. */
@@ -703,6 +703,19 @@ export type FlipRehabStatus = 'planned' | 'in_progress' | 'completed' | 'cancell
 export type FlipPurchaseType = 'mls' | 'auction' | 'reo' | 'short_sale'
 export type FlipDueDiligencePhase = 'review' | 'budget_analysis' | 'rehab' | 'listing'
 
+/** Supuestos de underwriting del deal (pro-forma); alimenta proyección ROI/IRR en el Core. */
+export type FlipProForma = {
+  acquisitionFee?: number
+  purchaseClosingCosts?: number
+  projectedRehabCost?: number
+  monthlyHoa?: number
+  monthlyTaxesInsurance?: number
+  resaleValue?: number
+  realtorCommissionPct?: number
+  saleClosingCosts?: number
+  holdingMonths?: number
+}
+
 /** Proyecto operativo Fix & Flip (1:1 con activo type=flip). */
 export type FlipProject = {
   assetId: string
@@ -717,6 +730,9 @@ export type FlipProject = {
   purchaseDate?: string
   estimatedSaleDate?: string
   actualSaleDate?: string
+  salePrice?: number
+  revenueFactId?: string
+  proForma?: FlipProForma
   createdAt: string
   updatedAt: string
 }

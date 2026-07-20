@@ -65,7 +65,7 @@ import { json, noContent } from '../lib/http'
 import { newId } from '../lib/ids'
 import { publishDomainEvent } from '../lib/events'
 import { ensureCognitoUser, setCognitoUserPassword } from '../lib/cognito-admin'
-import { computeAssetFinancialPackage, computeAssetMetrics } from '../services/metrics'
+import { computeAssetFinancialPackageForAsset, computeAssetMetricsForAsset } from '../services/metrics'
 import { aggregateFinancialPackages } from '../services/aggregate-metrics'
 import {
   buildFinancialInsightInput,
@@ -191,7 +191,7 @@ async function loadAssetFinancialPackage(tenantId: string, asset: Asset) {
     repo.getFinancing(tenantId, asset.id),
     repo.listCapitalContributions(tenantId, asset.id),
   ])
-  return computeAssetFinancialPackage(asset, rev, cost, fin, contributions)
+  return computeAssetFinancialPackageForAsset(tenantId, asset, rev, cost, fin, contributions)
 }
 
 async function routeAdmin(
@@ -1193,7 +1193,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         if (deniedF) return deniedF
         const rev = await repo.listRevenueFacts(ctx.tenantId, assetId)
         const cost = await repo.listCostFacts(ctx.tenantId, assetId)
-        const metrics = computeAssetMetrics(a, rev, cost)
+        const metrics = await computeAssetMetricsForAsset(ctx.tenantId, a, rev, cost)
         const { lines, operatingIncome } = buildStandardizedStructure(metrics, rev, cost)
         return finalizeAudit(ctx, event, json(200, { assetId, lines, operatingIncome, ebitda: metrics.ebitda, netProfit: metrics.netProfit }))
       }
@@ -1422,7 +1422,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         for (const asset of a) {
           const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
           const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
-          const m = computeAssetMetrics(asset, rev, cost)
+          const m = await computeAssetMetricsForAsset(ctx.tenantId, asset, rev, cost)
           series.push({ assetId: asset.id, cashFlow: m.cashFlow })
         }
         return finalizeAudit(ctx, event, json(200, { portfolioId, series }))
@@ -1440,7 +1440,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         for (const asset of a) {
           const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
           const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
-          const m = computeAssetMetrics(asset, rev, cost)
+          const m = await computeAssetMetricsForAsset(ctx.tenantId, asset, rev, cost)
           const w = totalCap > 0 ? asset.initialInvestment / totalCap : 0
           weightedRoi += m.roi * w
         }
@@ -1586,7 +1586,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         for (const asset of a) {
           const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
           const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
-          const m = computeAssetMetrics(asset, rev, cost)
+          const m = await computeAssetMetricsForAsset(ctx.tenantId, asset, rev, cost)
           series.push({ assetId: asset.id, cashFlow: m.cashFlow })
         }
         return finalizeAudit(ctx, event, json(200, { scenario: loaded.meta, projectId, series }))
@@ -1655,7 +1655,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         for (const asset of assets) {
           const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
           const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
-          const m = computeAssetMetrics(asset, rev, cost)
+          const m = await computeAssetMetricsForAsset(ctx.tenantId, asset, rev, cost)
           totalRev += m.accumulatedRevenue
           totalCost += m.operatingCosts
           rows.push({
@@ -1673,7 +1673,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         for (const asset of assets) {
           const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
           const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
-          const m = computeAssetMetrics(asset, rev, cost)
+          const m = await computeAssetMetricsForAsset(ctx.tenantId, asset, rev, cost)
           wSum += m.roi * (asset.initialInvestment / (totalCap || 1))
         }
         const portfolioROI = totalCap ? (netCashFlowYTD / totalCap) * 100 : 0
@@ -1682,7 +1682,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         for (const asset of assets) {
           const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
           const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
-          const m = computeAssetMetrics(asset, rev, cost)
+          const m = await computeAssetMetricsForAsset(ctx.tenantId, asset, rev, cost)
           irrSum += m.irr
         }
         const irrAvg = assets.length ? irrSum / assets.length : 0
@@ -1715,7 +1715,7 @@ export async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayPr
         for (const asset of assets) {
           const rev = await repo.listRevenueFacts(ctx.tenantId, asset.id)
           const cost = await repo.listCostFacts(ctx.tenantId, asset.id)
-          const m = computeAssetMetrics(asset, rev, cost)
+          const m = await computeAssetMetricsForAsset(ctx.tenantId, asset, rev, cost)
           enriched.push({ id: asset.id, name: asset.name, metrics: m })
         }
         return finalizeAudit(ctx, event, json(200, {

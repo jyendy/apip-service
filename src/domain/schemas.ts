@@ -633,11 +633,25 @@ export const flipRehabStatusSchema = z.enum(['planned', 'in_progress', 'complete
 export const flipPurchaseTypeSchema = z.enum(['mls', 'auction', 'reo', 'short_sale'])
 export const flipDueDiligencePhaseSchema = z.enum(['review', 'budget_analysis', 'rehab', 'listing'])
 
+export const flipProFormaSchema = z.object({
+  acquisitionFee: z.number().nonnegative().optional(),
+  purchaseClosingCosts: z.number().nonnegative().optional(),
+  projectedRehabCost: z.number().nonnegative().optional(),
+  monthlyHoa: z.number().nonnegative().optional(),
+  monthlyTaxesInsurance: z.number().nonnegative().optional(),
+  resaleValue: z.number().nonnegative().optional(),
+  realtorCommissionPct: z.number().min(0).max(100).optional(),
+  saleClosingCosts: z.number().nonnegative().optional(),
+  holdingMonths: z.number().int().min(1).max(600).optional(),
+})
+
 export const putFlipProjectBody = z.object({
   address: z.string().max(500).optional(),
   purchaseType: flipPurchaseTypeSchema.optional(),
   estimatedSaleDate: z.string().datetime().optional(),
   actualSaleDate: z.string().datetime().optional(),
+  salePrice: z.number().positive().optional(),
+  proForma: flipProFormaSchema.optional(),
 })
 
 export const patchFlipProjectBody = putFlipProjectBody.partial()
@@ -646,6 +660,7 @@ export const patchFlipWorkflowBody = z.object({
   workflowStatus: flipWorkflowStatusSchema,
   comment: z.string().max(2000).optional(),
   transitionDate: z.string().datetime().optional(),
+  salePrice: z.number().positive().optional(),
 })
 
 export const createFlipDueDiligenceBody = z.object({

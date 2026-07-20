@@ -8,11 +8,17 @@ import type {
   CapitalContribution,
   CashFlowPoint,
   CostFact,
+  FlipProForma,
   MetricsCoverage,
   MetricsDataMode,
   RevenueFact,
 } from '../domain/types'
 import { buildDebtServiceByMonth, financingPublicSnapshot, generateAmortizationSchedule } from './financing'
+import {
+  flipProFormaHorizonMonths,
+  hasFlipProForma,
+  projectedFlipProFormaMonth,
+} from './flip-proforma'
 import {
   CALCULATION_VERSION,
   computeIrrFromMonthlyFlows,
@@ -21,6 +27,7 @@ import {
   npvFromMonthlyFlows,
   simpleRoiPercent,
 } from '../financial/engine'
+import * as flipRepo from '../repositories/flipping-repository'
 
 function monthKey(isoDate: string): string {
   const d = new Date(isoDate)
@@ -125,24 +132,32 @@ function emptyMetrics(asset: Asset): AssetMetricsComputed {
   }
 }
 
+export type ComputeAssetMetricsOptions = {
+  flipProForma?: FlipProForma
+}
+
 /**
- * Motor híbrido: simulación (`financialModel`) + hechos (`RevenueFact`/`CostFact`).
+ * Motor híbrido: simulación (`financialModel` o pro-forma flip) + hechos (`RevenueFact`/`CostFact`).
  * ROI/IRR y agregados se derivan de la serie mensual unificada (fuente de verdad en backend).
  */
 export function computeAssetMetrics(
   asset: Asset,
   revenue: RevenueFact[],
   costs: CostFact[],
+  options: ComputeAssetMetricsOptions = {},
 ): AssetMetricsComputed {
   const actualByMonth = buildActualByMonth(revenue, costs)
   const acqYm = monthKey(asset.acquisitionDate)
   const model = asset.financialModel
   const modelMonths = model?.durationMonths ?? 0
+  const proForma = options.flipProForma
+  const proFormaMonths =
+    proForma && hasFlipProForma(proForma) ? flipProFormaHorizonMonths(proForma, modelMonths) : 0
 
   const lastFactYm = lastYmWithFacts(actualByMonth)
   const spanFromFacts = lastFactYm !== null ? monthsBetweenYm(acqYm, lastFactYm) + 1 : 0
 
-  const totalMonths = Math.max(modelMonths, spanFromFacts)
+  const totalMonths = Math.max(modelMonths, proFormaMonths, spanFromFacts)
 
   if (totalMonths === 0) {
     return emptyMetrics(asset)
@@ -184,6 +199,17 @@ export function computeAssetMetrics(
       maintM = act!.maintenance
       depM = act!.depreciation
       otherM = act!.other
+    } else if (proForma && hasFlipProForma(proForma)) {
+      mode = 'PROJECTED'
+      projectedMonths++
+      const p = projectedFlipProFormaMonth(proForma, i, totalMonths)
+      revM = p.rev
+      const c = p.cost
+      directM = 0
+      opM = c
+      maintM = 0
+      depM = 0
+      otherM = 0
     } else if (model) {
       mode = 'PROJECTED'
       projectedMonths++
@@ -331,8 +357,9 @@ export function computeAssetFinancialPackage(
   costs: CostFact[],
   financing: AssetFinancing | null,
   contributions: CapitalContribution[] = [],
+  options: ComputeAssetMetricsOptions = {},
 ): AssetFinancialMetricsPackage {
-  const assetM = computeAssetMetrics(asset, revenue, costs)
+  const assetM = computeAssetMetrics(asset, revenue, costs, options)
   auditLog({
     tag: 'APIP_CASHFLOW_BASE',
     entityType: 'asset',
@@ -524,4 +551,32 @@ export function computeAssetFinancialPackage(
     financing: financingPublicSnapshot(financing, schedule),
     projectionVsReality,
   }
+}
+
+export async function resolveFlipProForma(tenantId: string, asset: Asset): Promise<FlipProForma | undefined> {
+  if (asset.type !== 'flip') return undefined
+  const project = await flipRepo.getFlipProject(tenantId, asset.id)
+  return project?.proForma
+}
+
+export async function computeAssetMetricsForAsset(
+  tenantId: string,
+  asset: Asset,
+  revenue: RevenueFact[],
+  costs: CostFact[],
+): Promise<AssetMetricsComputed> {
+  const flipProForma = await resolveFlipProForma(tenantId, asset)
+  return computeAssetMetrics(asset, revenue, costs, { flipProForma })
+}
+
+export async function computeAssetFinancialPackageForAsset(
+  tenantId: string,
+  asset: Asset,
+  revenue: RevenueFact[],
+  costs: CostFact[],
+  financing: AssetFinancing | null,
+  contributions: CapitalContribution[] = [],
+): Promise<AssetFinancialMetricsPackage> {
+  const flipProForma = await resolveFlipProForma(tenantId, asset)
+  return computeAssetFinancialPackage(asset, revenue, costs, financing, contributions, { flipProForma })
 }

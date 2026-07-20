@@ -121,7 +121,7 @@ Respuesta **201**: objeto `Portfolio` creado (`id` generado en servidor, `tenant
 
 ### Flipping (módulo operativo Fix & Flip)
 
-Solo aplica a activos con `type: flip`. No expone métricas financieras; las rehabilitaciones generan `CostFact` con `source: flipping`.
+Solo aplica a activos con `type: flip`. No expone métricas financieras; las rehabilitaciones generan `CostFact` con `source: flipping` y la venta (`workflowStatus: sold` con precio y fecha) genera `RevenueFact` con `sourceRef.kind: flip_sale`.
 
 Documentación de producto (front): [`../../apip-front/doc/flipping-operativo-mvp.md`](../../apip-front/doc/flipping-operativo-mvp.md).
 
@@ -129,8 +129,8 @@ Documentación de producto (front): [`../../apip-front/doc/flipping-operativo-mv
 |--------|------|-------------|
 | GET | `/v1/flipping/projects/{assetId}` | Proyecto + activo (404 si no iniciado) |
 | PUT | `/v1/flipping/projects/{assetId}` | Inicia o actualiza proyecto (seed DD en primera creación) |
-| PATCH | `/v1/flipping/projects/{assetId}` | Actualiza fechas, dirección y tipo de compra |
-| PATCH | `/v1/flipping/projects/{assetId}/workflow` | Cambio de estado + comentario opcional |
+| PATCH | `/v1/flipping/projects/{assetId}` | Actualiza fechas, dirección, tipo de compra, precio de venta y **proForma** |
+| PATCH | `/v1/flipping/projects/{assetId}/workflow` | Cambio de estado + comentario opcional; al marcar `sold` requiere `salePrice` y `actualSaleDate` → sincroniza `RevenueFact` |
 | GET | `/v1/flipping/projects/{assetId}/due-diligence` | Lista checklist |
 | POST | `/v1/flipping/projects/{assetId}/due-diligence` | Añade ítem al checklist |
 | PATCH | `/v1/flipping/projects/{assetId}/due-diligence/{itemId}` | Marca completado / edita ítem |

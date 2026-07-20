@@ -5,6 +5,8 @@ import {
   FLIP_REHAB_CATEGORIES,
   rehabCategoryToCostCategory,
   shouldSyncCostFactForRehab,
+  shouldSyncRevenueFactForSale,
+  validateSoldProjectReady,
 } from './flipping'
 
 describe('flipping service', () => {
@@ -19,6 +21,54 @@ describe('flipping service', () => {
     expect(shouldSyncCostFactForRehab({ amount: 100, status: 'planned' })).toBe(false)
     expect(shouldSyncCostFactForRehab({ amount: 0, status: 'completed' })).toBe(false)
     expect(shouldSyncCostFactForRehab({ amount: 100, status: 'cancelled' })).toBe(false)
+  })
+
+  it('syncs revenue facts only for sold projects with price and sale date', () => {
+    expect(
+      shouldSyncRevenueFactForSale({
+        workflowStatus: 'sold',
+        salePrice: 250000,
+        actualSaleDate: '2026-01-15T00:00:00.000Z',
+      }),
+    ).toBe(true)
+    expect(
+      shouldSyncRevenueFactForSale({
+        workflowStatus: 'listed',
+        salePrice: 250000,
+        actualSaleDate: '2026-01-15T00:00:00.000Z',
+      }),
+    ).toBe(false)
+    expect(
+      shouldSyncRevenueFactForSale({
+        workflowStatus: 'sold',
+        salePrice: 0,
+        actualSaleDate: '2026-01-15T00:00:00.000Z',
+      }),
+    ).toBe(false)
+  })
+
+  it('requires sale price and date when workflow is sold', () => {
+    expect(
+      validateSoldProjectReady({
+        workflowStatus: 'sold',
+        salePrice: 100000,
+        actualSaleDate: '2026-01-15T00:00:00.000Z',
+      }),
+    ).toBeNull()
+    expect(
+      validateSoldProjectReady({
+        workflowStatus: 'sold',
+        salePrice: undefined,
+        actualSaleDate: '2026-01-15T00:00:00.000Z',
+      }),
+    ).toBe('SALE_PRICE_REQUIRED')
+    expect(
+      validateSoldProjectReady({
+        workflowStatus: 'rehab',
+        salePrice: undefined,
+        actualSaleDate: undefined,
+      }),
+    ).toBeNull()
   })
 
   it('exposes the complete reusable catalogs', () => {

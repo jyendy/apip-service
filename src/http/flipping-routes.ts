@@ -25,8 +25,51 @@ import {
   ensureFlipProject,
   FLIP_PURCHASE_TYPES,
   FLIP_REHAB_CATEGORIES,
+  persistFlipProjectWithSaleSync,
   syncRehabCostFact,
 } from '../services/flipping'
+
+function flipValidationError(code: string): string {
+  if (code === 'SALE_PRICE_REQUIRED') return 'Precio de venta requerido para cerrar como vendido'
+  if (code === 'SALE_DATE_REQUIRED') return 'Fecha real de venta requerida para cerrar como vendido'
+  return 'Validación de venta inválida'
+}
+
+async function saveFlipProject(
+  ctx: RequestContext,
+  event: APIGatewayProxyEventV2,
+  asset: Asset,
+  project: FlipProject,
+): Promise<APIGatewayProxyResultV2> {
+  try {
+    const saved = await persistFlipProjectWithSaleSync(ctx.tenantId, asset, project)
+    return finalizeAudit(ctx, event, json(200, { project: saved, asset }))
+  } catch (e) {
+    const code = e instanceof Error ? e.message : ''
+    if (code === 'SALE_PRICE_REQUIRED' || code === 'SALE_DATE_REQUIRED') {
+      return auditedJsonError(ctx, event, 400, 'VALIDATION', flipValidationError(code))
+    }
+    throw e
+  }
+}
+
+async function saveFlipProjectWorkflow(
+  ctx: RequestContext,
+  event: APIGatewayProxyEventV2,
+  asset: Asset,
+  project: FlipProject,
+): Promise<APIGatewayProxyResultV2> {
+  try {
+    const saved = await persistFlipProjectWithSaleSync(ctx.tenantId, asset, project)
+    return finalizeAudit(ctx, event, json(200, { project: saved }))
+  } catch (e) {
+    const code = e instanceof Error ? e.message : ''
+    if (code === 'SALE_PRICE_REQUIRED' || code === 'SALE_DATE_REQUIRED') {
+      return auditedJsonError(ctx, event, 400, 'VALIDATION', flipValidationError(code))
+    }
+    throw e
+  }
+}
 
 function parseBody<T>(raw: string | undefined): T {
   if (!raw) return {} as T
@@ -148,8 +191,7 @@ export async function tryRouteFlipping(
         ...body.data,
         updatedAt: now,
       }
-      await flipRepo.putFlipProject(next)
-      return finalizeAudit(ctx, event, json(200, { project: next, asset }))
+      return saveFlipProject(ctx, event, asset, next)
     }
     if (method === 'PATCH') {
       const denied = requireRbac(ctx, event, rbacState, 'asset:write', scope)
@@ -164,8 +206,7 @@ export async function tryRouteFlipping(
       }
       const now = new Date().toISOString()
       const next: FlipProject = { ...project, ...body.data, updatedAt: now }
-      await flipRepo.putFlipProject(next)
-      return finalizeAudit(ctx, event, json(200, { project: next, asset }))
+      return saveFlipProject(ctx, event, asset, next)
     }
   }
 
@@ -181,17 +222,20 @@ export async function tryRouteFlipping(
     if (!project) {
       project = await ensureFlipProject(ctx.tenantId, assetId, ctx.subject)
     }
-    const now = body.data.transitionDate ?? new Date().toISOString()
+    const transitionAt = body.data.transitionDate ?? new Date().toISOString()
     const next: FlipProject = {
       ...project,
       workflowStatus: body.data.workflowStatus,
-      workflowUpdatedAt: now,
+      workflowUpdatedAt: transitionAt,
       workflowUpdatedBy: ctx.subject,
       workflowComment: body.data.comment,
       updatedAt: new Date().toISOString(),
+      ...(body.data.salePrice !== undefined ? { salePrice: body.data.salePrice } : {}),
+      ...(body.data.workflowStatus === 'sold' && !project.actualSaleDate
+        ? { actualSaleDate: transitionAt }
+        : {}),
     }
-    await flipRepo.putFlipProject(next)
-    return finalizeAudit(ctx, event, json(200, { project: next }))
+    return saveFlipProjectWorkflow(ctx, event, asset, next)
   }
 
   // /v1/flipping/projects/{assetId}/due-diligence
