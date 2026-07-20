@@ -216,7 +216,6 @@ export async function syncSaleRevenueFact(
 }
 
 export async function syncAssetFinancialModelFromProForma(
-  tenantId: string,
   asset: Asset,
   proForma?: FlipProForma,
 ): Promise<Asset> {
@@ -243,7 +242,7 @@ export async function persistFlipProjectWithSaleSync(
   const synced = await syncSaleRevenueFact(tenantId, asset, project)
   await flipRepo.putFlipProject(synced)
   if (project.proForma !== undefined) {
-    await syncAssetFinancialModelFromProForma(tenantId, asset, project.proForma)
+    await syncAssetFinancialModelFromProForma(asset, project.proForma)
   }
   return synced
 }
