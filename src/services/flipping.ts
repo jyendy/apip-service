@@ -45,7 +45,7 @@ export function rehabCategoryToCostCategory(category: FlipRehabCategory): string
 }
 
 export function shouldSyncCostFactForRehab(rehab: Pick<FlipRehab, 'amount' | 'status'>): boolean {
-  return rehab.amount > 0 && rehab.status !== 'cancelled'
+  return rehab.amount > 0 && (rehab.status === 'in_progress' || rehab.status === 'completed')
 }
 
 export async function ensureFlipProject(
@@ -99,12 +99,18 @@ export async function syncRehabCostFact(
   asset: Asset,
   rehab: FlipRehab,
 ): Promise<FlipRehab> {
+  const now = new Date().toISOString()
+
   if (!shouldSyncCostFactForRehab(rehab)) {
+    if (rehab.costFactId) {
+      await repo.deleteCostFact(tenantId, asset.id, rehab.costFactId)
+      const { costFactId: _removed, ...rest } = rehab
+      return { ...rest, updatedAt: now }
+    }
     return rehab
   }
 
   const category = rehabCategoryToCostCategory(rehab.category)
-  const now = new Date().toISOString()
 
   if (rehab.costFactId) {
     const facts = await repo.listCostFacts(tenantId, asset.id)

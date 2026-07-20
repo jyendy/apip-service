@@ -13,8 +13,10 @@ describe('flipping service', () => {
     expect(rehabCategoryToCostCategory('other')).toBe('flip_other')
   })
 
-  it('skips cost fact sync for cancelled or zero amount rehabs', () => {
+  it('syncs cost facts only for in_progress or completed rehabs with amount', () => {
     expect(shouldSyncCostFactForRehab({ amount: 100, status: 'completed' })).toBe(true)
+    expect(shouldSyncCostFactForRehab({ amount: 100, status: 'in_progress' })).toBe(true)
+    expect(shouldSyncCostFactForRehab({ amount: 100, status: 'planned' })).toBe(false)
     expect(shouldSyncCostFactForRehab({ amount: 0, status: 'completed' })).toBe(false)
     expect(shouldSyncCostFactForRehab({ amount: 100, status: 'cancelled' })).toBe(false)
   })
