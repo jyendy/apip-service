@@ -32,7 +32,20 @@ import {
 function flipValidationError(code: string): string {
   if (code === 'SALE_PRICE_REQUIRED') return 'Precio de venta requerido para cerrar como vendido'
   if (code === 'SALE_DATE_REQUIRED') return 'Fecha real de venta requerida para cerrar como vendido'
+  if (code === 'REHAB_DATE_BEFORE_ACQUISITION') {
+    return 'La fecha de rehabilitación no puede ser anterior a la fecha de adquisición del activo'
+  }
   return 'Validación de venta inválida'
+}
+
+function dateOnlyUtc(iso: string): string {
+  return iso.slice(0, 10)
+}
+
+function assertRehabDateOnOrAfterAcquisition(asset: Asset, rehabDateIso: string): void {
+  if (dateOnlyUtc(rehabDateIso) < dateOnlyUtc(asset.acquisitionDate)) {
+    throw new Error('REHAB_DATE_BEFORE_ACQUISITION')
+  }
 }
 
 async function saveFlipProject(
@@ -61,7 +74,7 @@ async function saveFlipProjectWorkflow(
 ): Promise<APIGatewayProxyResultV2> {
   try {
     const saved = await persistFlipProjectWithSaleSync(ctx.tenantId, asset, project)
-    return finalizeAudit(ctx, event, json(200, { project: saved }))
+    return finalizeAudit(ctx, event, json(200, { project: saved, asset }))
   } catch (e) {
     const code = e instanceof Error ? e.message : ''
     if (code === 'SALE_PRICE_REQUIRED' || code === 'SALE_DATE_REQUIRED') {
@@ -223,6 +236,22 @@ export async function tryRouteFlipping(
       project = await ensureFlipProject(ctx.tenantId, assetId, ctx.subject)
     }
     const transitionAt = body.data.transitionDate ?? new Date().toISOString()
+    let workingAsset = asset
+    if (body.data.workflowStatus === 'purchased') {
+      const [rev, cost] = await Promise.all([
+        repo.listRevenueFacts(ctx.tenantId, assetId),
+        repo.listCostFacts(ctx.tenantId, assetId),
+      ])
+      if (rev.length === 0 && cost.length === 0) {
+        const now = new Date().toISOString()
+        workingAsset = {
+          ...asset,
+          acquisitionDate: transitionAt,
+          updatedAt: now,
+        }
+        await repo.putAsset(workingAsset)
+      }
+    }
     const next: FlipProject = {
       ...project,
       workflowStatus: body.data.workflowStatus,
@@ -235,7 +264,7 @@ export async function tryRouteFlipping(
         ? { actualSaleDate: transitionAt }
         : {}),
     }
-    return saveFlipProjectWorkflow(ctx, event, asset, next)
+    return saveFlipProjectWorkflow(ctx, event, workingAsset, next)
   }
 
   // /v1/flipping/projects/{assetId}/due-diligence
@@ -329,6 +358,15 @@ export async function tryRouteFlipping(
       if (body.data.vendorId && (!vendor || !vendor.active)) {
         return auditedJsonError(ctx, event, 400, 'VALIDATION', 'vendorId no existe o está inactivo')
       }
+      try {
+        assertRehabDateOnOrAfterAcquisition(asset, body.data.date)
+      } catch (e) {
+        const code = e instanceof Error ? e.message : ''
+        if (code === 'REHAB_DATE_BEFORE_ACQUISITION') {
+          return auditedJsonError(ctx, event, 400, 'VALIDATION', flipValidationError(code))
+        }
+        throw e
+      }
       let rehab: FlipRehab = {
         id: newId.flipRehab(),
         tenantId: ctx.tenantId,
@@ -367,6 +405,16 @@ export async function tryRouteFlipping(
     const vendor = vendorId ? await vendorsRepo.getVendor(ctx.tenantId, vendorId) : null
     if (vendorId && (!vendor || !vendor.active)) {
       return auditedJsonError(ctx, event, 400, 'VALIDATION', 'vendorId no existe o está inactivo')
+    }
+    const nextDate = body.data.date ?? existing.date
+    try {
+      assertRehabDateOnOrAfterAcquisition(asset, nextDate)
+    } catch (e) {
+      const code = e instanceof Error ? e.message : ''
+      if (code === 'REHAB_DATE_BEFORE_ACQUISITION') {
+        return auditedJsonError(ctx, event, 400, 'VALIDATION', flipValidationError(code))
+      }
+      throw e
     }
     let rehab: FlipRehab = {
       ...existing,

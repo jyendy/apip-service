@@ -130,7 +130,7 @@ Documentación de producto (front): [`../../apip-front/doc/flipping-operativo-mv
 | GET | `/v1/flipping/projects/{assetId}` | Proyecto + activo (404 si no iniciado) |
 | PUT | `/v1/flipping/projects/{assetId}` | Inicia o actualiza proyecto (seed DD en primera creación) |
 | PATCH | `/v1/flipping/projects/{assetId}` | Actualiza fechas, dirección, tipo de compra, precio de venta y **proForma** |
-| PATCH | `/v1/flipping/projects/{assetId}/workflow` | Cambio de estado + comentario opcional; al marcar `sold` requiere `salePrice` y `actualSaleDate` → sincroniza `RevenueFact` |
+| PATCH | `/v1/flipping/projects/{assetId}/workflow` | Cambio de estado + comentario opcional; al marcar `sold` requiere `salePrice` y `actualSaleDate` → sincroniza `RevenueFact`; al marcar `purchased` sincroniza `Asset.acquisitionDate` si no hay hechos que bloqueen el modelo |
 | GET | `/v1/flipping/projects/{assetId}/due-diligence` | Lista checklist |
 | POST | `/v1/flipping/projects/{assetId}/due-diligence` | Añade ítem al checklist |
 | PATCH | `/v1/flipping/projects/{assetId}/due-diligence/{itemId}` | Marca completado / edita ítem |
