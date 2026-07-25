@@ -12,6 +12,10 @@ Tabla física: `PK` (HASH), `SK` (RANGE). Índices: **GSI1**, **GSI2**.
 | `TENANT#<id>` | `ASSET#<id>` | ASSET | GSI1PK=`TENANT#..#PROJECT#..`, GSI1SK=`ASSET#..` | GSI2PK=`TENANT#..#TYPE#..`, GSI2SK=`ASSET#..` |
 | `TENANT#<id>` | `ASSET#<aid>#REV#<fid>` | REV_FACT | — | — |
 | `TENANT#<id>` | `ASSET#<aid>#COST#<fid>` | COST_FACT | — | — |
+| `TENANT#<id>` | `FLIP#PROJECT#<assetId>` | FLIP_PROJECT | — | — |
+| `TENANT#<id>` | `FLIP#DD#<assetId>#<itemId>` | FLIP_DD | — | — |
+| `TENANT#<id>` | `FLIP#REHAB#<assetId>#<rehabId>` | FLIP_REHAB | — | — |
+| `TENANT#<id>` | `VENDOR#<vendorId>` | VENDOR | — | — |
 | `TENANT#<id>` | `IMPORT#<jobId>` | IMPORT | — | — |
 
 ## Patrones
@@ -23,7 +27,10 @@ Tabla física: `PK` (HASH), `SK` (RANGE). Índices: **GSI1**, **GSI2**.
 5. **Listar activos por tipo** — `Query GSI2` con `GSI2PK=TENANT#..#TYPE#..`.
 6. **Listar activos (todos en tenant)** — `Query PK` + `FilterExpression entityType=ASSET` (MVP; optimizar con entidad secundaria si crece).
 7. **Hechos de ingreso/costo por activo** — `Query PK` + `SK begins_with ASSET#<aid>#REV#` o `#COST#`.
-8. **Import jobs** — `GetItem` con `SK=IMPORT#..`.
+8. **Proyecto Flipping por activo** — `GetItem` con `SK=FLIP#PROJECT#<assetId>` (activo debe ser `type=flip`).
+9. **Due diligence / rehabs Flipping** — `Query PK` + `SK begins_with FLIP#DD#<assetId>#` o `FLIP#REHAB#<assetId>#`.
+10. **Proveedores globales del tenant** — `Query PK` + `SK begins_with VENDOR#`.
+11. **Import jobs** — `GetItem` con `SK=IMPORT#..`.
 
 ## Tablas auxiliares (fuera de esta tabla)
 

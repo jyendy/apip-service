@@ -65,8 +65,14 @@ const financialModelSchema = z
     estimatedMonthlyRevenue: z.number().nonnegative(),
     estimatedMonthlyCost: z.number().nonnegative(),
     durationMonths: z.number().int().positive().max(600),
-    revenueGrowthRate: z.number().optional(),
-    costGrowthRate: z.number().optional(),
+    revenueGrowthRate: z
+      .number()
+      .nullish()
+      .transform(v => (v == null ? undefined : v)),
+    costGrowthRate: z
+      .number()
+      .nullish()
+      .transform(v => (v == null ? undefined : v)),
   })
   .optional()
 
@@ -85,7 +91,7 @@ export const createAssetBody = z.object({
   /** Escenario simulado u actual canónico; omitir = actual (legacy). */
   scenarioId: z.string().min(1).nullable().optional(),
   name: z.string().min(1),
-  type: z.enum(['transport', 'real_estate', 'machinery', 'energy', 'other']),
+  type: z.enum(['transport', 'real_estate', 'flip', 'machinery', 'energy', 'other']),
   acquisitionDate: z.string().datetime(),
   initialInvestment: z.number(),
   currency: z.string().length(3).default('USD'),
@@ -137,7 +143,7 @@ export const patchScenarioBody = z.object({
 export const listQuery = z.object({
   projectId: z.string().optional(),
   portfolioId: z.string().optional(),
-  type: z.enum(['transport', 'real_estate', 'machinery', 'energy', 'other']).optional(),
+  type: z.enum(['transport', 'real_estate', 'flip', 'machinery', 'energy', 'other']).optional(),
   limit: z.coerce.number().min(1).max(100).optional(),
   cursor: z.string().optional(),
   /** Filtro de escenario para listados de activos (requiere `scenarioId` si no es `actual`). */
@@ -161,7 +167,7 @@ export const simulationFinancingBody = z.object({
 
 export const simulationBody = z.object({
   name: z.string().min(1).optional(),
-  assetType: z.enum(['transport', 'real_estate', 'machinery', 'energy', 'other']),
+  assetType: z.enum(['transport', 'real_estate', 'flip', 'machinery', 'energy', 'other']),
   initialCapital: z.number().positive(),
   expectedMonthlyRevenue: z.number().nonnegative(),
   expectedOperatingCost: z.number().nonnegative(),
@@ -182,7 +188,7 @@ const importAssetRowSchema = z.object({
   portfolioId: z.string().min(1),
   projectId: z.string().min(1),
   name: z.string().min(1),
-  type: z.enum(['transport', 'real_estate', 'machinery', 'energy', 'other']),
+  type: z.enum(['transport', 'real_estate', 'flip', 'machinery', 'energy', 'other']),
   acquisitionDate: z.string().datetime(),
   initialInvestment: z.number(),
   currency: z.string().length(3).optional(),
@@ -487,6 +493,8 @@ export const createDocumentBody = z.object({
   /** Obligatorio si la entidad no es un activo resuelto en servidor (p. ej. lease sin tabla propia). */
   portfolioId: z.string().optional(),
   projectId: z.string().optional(),
+  photoPhase: z.enum(['before', 'during', 'after']).optional(),
+  rehabId: z.string().optional(),
 })
 
 export const documentsListQuery = z.object({
@@ -590,4 +598,106 @@ export const createDocumentRequirementBody = z.object({
 
 export const documentRequirementsListQuery = z.object({
   entityType: z.string().min(1),
+})
+
+export const flipWorkflowStatusSchema = z.enum([
+  'review',
+  'offer_submitted',
+  'under_contract_purchase',
+  'purchased',
+  'rehab',
+  'listed',
+  'under_contract_sale',
+  'sold',
+  'cancelled',
+])
+
+export const flipRehabCategorySchema = z.enum([
+  'kitchen',
+  'bathroom',
+  'flooring',
+  'electrical',
+  'plumbing',
+  'roof',
+  'paint',
+  'hvac',
+  'landscaping',
+  'hoa',
+  'dumpster',
+  'permits',
+  'lawyer',
+  'other',
+])
+
+export const flipRehabStatusSchema = z.enum(['planned', 'in_progress', 'completed', 'cancelled'])
+export const flipPurchaseTypeSchema = z.enum(['mls', 'auction', 'reo', 'short_sale'])
+export const flipDueDiligencePhaseSchema = z.enum(['review', 'budget_analysis', 'rehab', 'listing'])
+
+export const flipProFormaSchema = z.object({
+  acquisitionFee: z.number().nonnegative().optional(),
+  purchaseClosingCosts: z.number().nonnegative().optional(),
+  projectedRehabCost: z.number().nonnegative().optional(),
+  monthlyHoa: z.number().nonnegative().optional(),
+  monthlyTaxesInsurance: z.number().nonnegative().optional(),
+  resaleValue: z.number().nonnegative().optional(),
+  realtorCommissionPct: z.number().min(0).max(100).optional(),
+  saleClosingCosts: z.number().nonnegative().optional(),
+  holdingMonths: z.number().int().min(1).max(600).optional(),
+})
+
+export const putFlipProjectBody = z.object({
+  address: z.string().max(500).optional(),
+  purchaseType: flipPurchaseTypeSchema.optional(),
+  estimatedSaleDate: z.string().datetime().optional(),
+  actualSaleDate: z.string().datetime().optional(),
+  salePrice: z.number().positive().optional(),
+  proForma: flipProFormaSchema.optional(),
+})
+
+export const patchFlipProjectBody = putFlipProjectBody.partial()
+
+export const patchFlipWorkflowBody = z.object({
+  workflowStatus: flipWorkflowStatusSchema,
+  comment: z.string().max(2000).optional(),
+  transitionDate: z.string().datetime().optional(),
+  salePrice: z.number().positive().optional(),
+})
+
+export const createFlipDueDiligenceBody = z.object({
+  phase: flipDueDiligencePhaseSchema,
+  name: z.string().min(1).max(200),
+  notes: z.string().max(5000).optional(),
+  sortOrder: z.number().int().optional(),
+})
+
+export const patchFlipDueDiligenceBody = z.object({
+  phase: flipDueDiligencePhaseSchema.optional(),
+  name: z.string().min(1).max(200).optional(),
+  completed: z.boolean().optional(),
+  notes: z.string().max(5000).optional(),
+  sortOrder: z.number().int().optional(),
+})
+
+export const createFlipRehabBody = z.object({
+  date: z.string().datetime(),
+  category: flipRehabCategorySchema,
+  description: z.string().max(2000).optional(),
+  vendorId: z.string().min(1).optional(),
+  amount: z.number().nonnegative(),
+  status: flipRehabStatusSchema.default('planned'),
+  notes: z.string().max(5000).optional(),
+  phaseId: z.string().optional(),
+})
+
+export const patchFlipRehabBody = createFlipRehabBody.partial()
+
+export const createVendorBody = z.object({
+  name: z.string().min(1).max(200),
+  phone: z.string().max(50).optional(),
+  email: z.string().email().max(320).optional(),
+  specialty: z.string().max(200).optional(),
+})
+
+export const patchVendorBody = createVendorBody.partial().extend({
+  active: z.boolean().optional(),
 })

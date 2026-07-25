@@ -7,9 +7,12 @@ import {
   type UserType,
 } from '@aws-sdk/client-cognito-identity-provider'
 
+/** Atributo real del User Pool actual (schema CFN con Name: custom:tenantId → custom:custom:tenantId). */
+const COGNITO_TENANT_ATTR = 'custom:custom:tenantId'
+
 export type EnsureCognitoUserInput = {
   email: string
-  /** Se persiste en Cognito como `custom:tenantId` para que el ID token lo lleve a la API. */
+  /** Se persiste en Cognito como `custom:custom:tenantId` para el ID token. */
   tenantId: string
   displayName?: string
   /** Contraseña temporal en Cognito; si existe, no se envía invitación por correo (MessageAction SUPPRESS). */
@@ -30,12 +33,12 @@ function readAttribute(user: UserType | undefined, key: string): string | undefi
 
 async function setCognitoTenantClaim(poolId: string, username: string, tenantId: string): Promise<void> {
   const tid = tenantId.trim()
-  if (!tid) throw new Error('tenantId vacío para custom:tenantId')
+  if (!tid) throw new Error(`tenantId vacío para ${COGNITO_TENANT_ATTR}`)
   await cognito.send(
     new AdminUpdateUserAttributesCommand({
       UserPoolId: poolId,
       Username: username,
-      UserAttributes: [{ Name: 'custom:tenantId', Value: tid }],
+      UserAttributes: [{ Name: COGNITO_TENANT_ATTR, Value: tid }],
     }),
   )
 }
@@ -69,7 +72,7 @@ export async function ensureCognitoUser(input: EnsureCognitoUserInput): Promise<
   const userAttributes = [
     { Name: 'email', Value: email },
     { Name: 'email_verified', Value: 'true' },
-    { Name: 'custom:tenantId', Value: tenantId },
+    { Name: COGNITO_TENANT_ATTR, Value: tenantId },
     ...(displayName ? [{ Name: 'name', Value: displayName }] : []),
   ]
 

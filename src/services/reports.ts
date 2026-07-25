@@ -1,5 +1,5 @@
 import * as repo from '../repositories/core-repository'
-import { computeAssetMetrics } from './metrics'
+import { computeAssetMetricsForAsset } from './metrics'
 import type { Asset, Portfolio } from '../domain/types'
 
 export type InvestmentSummaryRow = {
@@ -37,7 +37,7 @@ export async function buildInvestmentSummaryReport(tenantId: string): Promise<{
   for (const asset of assets) {
     const rev = await repo.listRevenueFacts(tenantId, asset.id)
     const cost = await repo.listCostFacts(tenantId, asset.id)
-    const m = computeAssetMetrics(asset, rev, cost)
+    const m = await computeAssetMetricsForAsset(tenantId, asset, rev, cost)
     totalRev += m.accumulatedRevenue
     totalCost += m.operatingCosts
     irrSum += m.irr
@@ -91,7 +91,7 @@ export async function buildAssetRegisterReport(tenantId: string): Promise<{
   for (const asset of assets) {
     const rev = await repo.listRevenueFacts(tenantId, asset.id)
     const cost = await repo.listCostFacts(tenantId, asset.id)
-    const m = computeAssetMetrics(asset, rev, cost)
+    const m = await computeAssetMetricsForAsset(tenantId, asset, rev, cost)
     items.push({
       assetId: asset.id,
       name: asset.name,
@@ -146,7 +146,7 @@ export async function buildPortfolioSnapshotReport(tenantId: string): Promise<{
     for (const asset of plist) {
       const rev = await repo.listRevenueFacts(tenantId, asset.id)
       const cost = await repo.listCostFacts(tenantId, asset.id)
-      const m = computeAssetMetrics(asset, rev, cost)
+      const m = await computeAssetMetricsForAsset(tenantId, asset, rev, cost)
       const w = totalCap > 0 ? asset.initialInvestment / totalCap : 0
       wRoi += m.roi * w
       irrAcc += m.irr

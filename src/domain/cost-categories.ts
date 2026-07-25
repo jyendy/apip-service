@@ -28,6 +28,19 @@ export const COST_CATEGORY_CATALOG: CostCategoryDefinition[] = [
   { code: 'compliance', label: 'Cumplimiento normativo', bucket: 'other' },
   { code: 'leasing', label: 'Arrendamiento de unidad', bucket: 'operational' },
   { code: 'tires', label: 'Llantas y neumáticos', bucket: 'maintenance' },
+  { code: 'kitchen', label: 'Cocina', bucket: 'maintenance' },
+  { code: 'bathroom', label: 'Baño', bucket: 'maintenance' },
+  { code: 'flooring', label: 'Pisos', bucket: 'maintenance' },
+  { code: 'electrical', label: 'Eléctrico', bucket: 'maintenance' },
+  { code: 'plumbing', label: 'Plomería', bucket: 'maintenance' },
+  { code: 'roof', label: 'Techo', bucket: 'maintenance' },
+  { code: 'paint', label: 'Pintura', bucket: 'maintenance' },
+  { code: 'hvac', label: 'HVAC', bucket: 'maintenance' },
+  { code: 'landscaping', label: 'Paisajismo', bucket: 'maintenance' },
+  { code: 'hoa', label: 'HOA', bucket: 'operational' },
+  { code: 'dumpster', label: 'Contenedor de residuos', bucket: 'maintenance' },
+  { code: 'lawyer', label: 'Abogado', bucket: 'other' },
+  { code: 'flip_other', label: 'Rehab — otro', bucket: 'maintenance' },
 ]
 
 const BUCKET_BY_CODE = new Map<string, MetricsCostBucket>(

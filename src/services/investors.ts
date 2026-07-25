@@ -1,6 +1,6 @@
 import * as repo from '../repositories/core-repository'
 import type { Investor } from '../domain/types'
-import { computeAssetMetrics } from './metrics'
+import { computeAssetMetricsForAsset } from './metrics'
 
 export type InvestorExposure = {
   investorId: string
@@ -26,7 +26,7 @@ export async function buildInvestorExposure(tenantId: string, investor: Investor
     for (const asset of assets) {
       const rev = await repo.listRevenueFacts(tenantId, asset.id)
       const cost = await repo.listCostFacts(tenantId, asset.id)
-      const m = computeAssetMetrics(asset, rev, cost)
+      const m = await computeAssetMetricsForAsset(tenantId, asset, rev, cost)
       portCap += asset.initialInvestment
       portRoiW += m.roi * asset.initialInvestment
       portIrr += m.irr

@@ -7,6 +7,7 @@ Documentación **específica de este repositorio**: despliegue, OpenAPI, patrone
 - **Segmentación de stacks AWS:** [`../infra/cloudformation/README.md`](../infra/cloudformation/README.md)
 - **Políticas IAM entre repos (front + service):** [`cross-repo-apip-policies.md`](./cross-repo-apip-policies.md)
 - **Patrones DynamoDB:** [`dynamodb-access-patterns.md`](./dynamodb-access-patterns.md)
+- **Módulo Flipping (producto):** [`../../apip-front/doc/flipping-operativo-mvp.md`](../../apip-front/doc/flipping-operativo-mvp.md)
 - **OpenAPI (MVP):** [`openapi.yaml`](./openapi.yaml)
 
 ## Especificación global de producto

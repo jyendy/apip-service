@@ -100,7 +100,7 @@ export async function tryRouteDocuments(
       return auditedJsonError(ctx, event, 400, 'VALIDATION', 'Query inválida', q.error.flatten())
     }
     let scope: { portfolioId?: string; projectId?: string } = {}
-    if (q.data.entityType === 'asset' || q.data.entityType === 'property') {
+    if (q.data.entityType === 'asset' || q.data.entityType === 'property' || q.data.entityType === 'flip_project') {
       const asset = await repo.getAsset(ctx.tenantId, q.data.entityId)
       if (!asset) return auditedJsonError(ctx, event, 404, 'NOT_FOUND', 'Activo no encontrado')
       scope = { portfolioId: asset.portfolioId, projectId: asset.projectId }
@@ -182,6 +182,8 @@ export async function tryRouteDocuments(
       status: 'pending',
       required: b.required,
       requirementId: b.requirementId,
+      photoPhase: b.photoPhase,
+      rehabId: b.rehabId,
       createdAt: now,
     }
     await docRepo.putDocument(doc)

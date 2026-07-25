@@ -107,6 +107,14 @@ export const gsi3pkDocumentEntity = (tenantId: string, entityType: string, entit
 
 export const gsi3skDocument = (documentId: string) => `DOC#${documentId}`
 
+export const skFlipProject = (assetId: string) => `FLIP#PROJECT#${assetId}`
+
+export const skFlipDueDiligenceItem = (assetId: string, itemId: string) => `FLIP#DD#${assetId}#${itemId}`
+
+export const skFlipRehab = (assetId: string, rehabId: string) => `FLIP#REHAB#${assetId}#${rehabId}`
+
+export const skVendor = (vendorId: string) => `VENDOR#${vendorId}`
+
 export const skDocument = (documentId: string) => `DOC#${documentId}`
 
 /** Plantillas de documentos requeridos por tipo de entidad. */

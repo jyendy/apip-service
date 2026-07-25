@@ -105,6 +105,8 @@ Respuesta **201**: objeto `Portfolio` creado (`id` generado en servidor, `tenant
 
 **Body POST/PATCH asset** (campos principales): ver `openapi.yaml` y esquema Zod `createAssetBody` / `patchAssetBody`.
 
+**Tipos de activo** (`type`): `transport`, `real_estate`, `flip`, `machinery`, `energy`, `other`. El tipo `flip` habilita el módulo operativo Flipping (Fix & Flip), independiente de `real_estate`.
+
 **Regla de edición (modelo):** si el activo ya tiene hechos operativos (`RevenueFact`/`CostFact`), el backend bloquea cambios estructurales en `type`, `acquisitionDate`, `initialInvestment` y `currency` con `409 MODEL_LOCKED` para evitar romper series históricas.
 
 **Body PUT `/cash-flows`**:
@@ -116,6 +118,37 @@ Respuesta **201**: objeto `Portfolio` creado (`id` generado en servidor, `tenant
   ]
 }
 ```
+
+### Flipping (módulo operativo Fix & Flip)
+
+Solo aplica a activos con `type: flip`. No expone métricas financieras; las rehabilitaciones generan `CostFact` con `source: flipping` y la venta (`workflowStatus: sold` con precio y fecha) genera `RevenueFact` con `sourceRef.kind: flip_sale`.
+
+Documentación de producto (front): [`../../apip-front/doc/flipping-operativo-mvp.md`](../../apip-front/doc/flipping-operativo-mvp.md).
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/v1/flipping/projects/{assetId}` | Proyecto + activo (404 si no iniciado) |
+| PUT | `/v1/flipping/projects/{assetId}` | Inicia o actualiza proyecto (seed DD en primera creación) |
+| PATCH | `/v1/flipping/projects/{assetId}` | Actualiza fechas, dirección, tipo de compra, precio de venta y **proForma** |
+| PATCH | `/v1/flipping/projects/{assetId}/workflow` | Cambio de estado + comentario opcional; al marcar `sold` requiere `salePrice` y `actualSaleDate` → sincroniza `RevenueFact` |
+| GET | `/v1/flipping/projects/{assetId}/due-diligence` | Lista checklist |
+| POST | `/v1/flipping/projects/{assetId}/due-diligence` | Añade ítem al checklist |
+| PATCH | `/v1/flipping/projects/{assetId}/due-diligence/{itemId}` | Marca completado / edita ítem |
+| GET | `/v1/flipping/projects/{assetId}/rehabs` | Lista rehabilitaciones |
+| POST | `/v1/flipping/projects/{assetId}/rehabs` | Alta rehab → crea `CostFact` si aplica |
+| PATCH | `/v1/flipping/projects/{assetId}/rehabs/{rehabId}` | Edición rehab → sincroniza `CostFact` |
+| GET | `/v1/flipping/catalogs` | Tipos de compra y categorías de rehabilitación |
+| GET | `/v1/vendors` | Lista proveedores globales del tenant |
+| POST | `/v1/vendors` | Crea proveedor (nombre, teléfono, email, especialidad) |
+| PATCH | `/v1/vendors/{vendorId}` | Actualiza o desactiva proveedor |
+
+El Due Diligence usa `phase`: `review`, `budget_analysis`, `rehab`, `listing`. No hay dependencias ni asignaciones.
+
+Las categorías rehab son `kitchen`, `bathroom`, `flooring`, `electrical`, `plumbing`, `roof`, `paint`, `hvac`, `landscaping`, `hoa`, `dumpster`, `permits`, `lawyer`, `other`.
+
+**Fotografías**: reutilizar `POST /v1/documents` con `entityType: flip_project`, `entityId: {assetId}`, campos opcionales `photoPhase` (`before` \| `during` \| `after`) y `rehabId`.
+
+**Documentos del activo**: `GET/POST /v1/documents` con `entityType: asset` (igual que Real Estate).
 
 ### Dashboard e insights
 

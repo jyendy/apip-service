@@ -45,6 +45,10 @@ Se escribe al crear/actualizar un tenant (`putTenant`). Permite `Query` eficient
 | Asset | `ASSET#{assetId}` |
 | Revenue fact (por activo) | `ASSET#{assetId}#REV#{factId}` |
 | Cost fact (por activo) | `ASSET#{assetId}#COST#{factId}` |
+| Proyecto Flipping (1:1 con activo `flip`) | `FLIP#PROJECT#{assetId}` |
+| Ítem due diligence Flipping | `FLIP#DD#{assetId}#{itemId}` |
+| Rehabilitación Flipping | `FLIP#REHAB#{assetId}#{rehabId}` |
+| Proveedor global del tenant | `VENDOR#{vendorId}` |
 | Import job | `IMPORT#{jobId}` |
 
 ### Atributos por ítem
@@ -52,7 +56,9 @@ Se escribe al crear/actualizar un tenant (`putTenant`). Permite `Query` eficient
 Todos los ítems incluyen `tenantId` y `entityType` para filtrado en queries amplias donde aplique.
 
 - **Asset**: incluye `portfolioId`, `projectId`, `initialInvestment`, y opcionalmente **`financialModel`** (simulación: ingresos/costo mensuales estimados, horizonte, tasas de crecimiento).
-- **RevenueFact / CostFact**: `date` ISO, `amount`, `category`, `source`; agregación mensual en el servicio de métricas.
+- **RevenueFact / CostFact**: `date` ISO, `amount`, `category`, `source` (`manual`, `import`, `api`, `real_estate`, `flipping`); agregación mensual en el servicio de métricas. Los rehabs Flipping crean `CostFact` con `sourceRef: { kind: flip_rehab, id }`.
+- **FlipProject / FlipDueDiligenceItem / FlipRehab**: datos operativos del módulo Flipping; no duplican métricas calculadas.
+- **Vendor**: catálogo transversal mínimo (`name`, `phone`, `email`, `specialty`, `active`), inicialmente gestionado desde Flipping.
 
 ### Diseño
 
